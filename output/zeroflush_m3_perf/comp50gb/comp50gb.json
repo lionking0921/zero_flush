@@ -1,0 +1,30 @@
+{
+  "params": {
+    "num": 50000000,
+    "value_size": 1024,
+    "threads": 16,
+    "cache_mb": 512,
+    "max_bg": 24
+  },
+  "native": {
+    "fillrandom": {
+      "error": "rc=127\n/home/embed/hyl/metadata_offload/source/rocksdb/build/db_bench: error while loading shared libraries: librocksdb.so.11: cannot open shared object file: No such file or directory\n",
+      "wall_s": 0.0013134479522705078
+    },
+    "readrandom": {
+      "error": "rc=127\n/home/embed/hyl/metadata_offload/source/rocksdb/build/db_bench: error while loading shared libraries: librocksdb.so.11: cannot open shared object file: No such file or directory\n",
+      "wall_s": 0.0014081001281738281
+    }
+  },
+  "zeroflush": {
+    "fillrandom": {
+      "error": "rc=-11\nr: Corruption: force_consistency_checks(DEBUG): VersionBuilder: L1 has overlapping ranges: file #73 largest key: '000000000031444F3030303030303030' seq:0, type:1 vs. file #78 smallest key: '00000000000011213030303030303030' seq:235741, type:1\nput error: Corruption: force_consistency_checks(DEBUG): VersionBuilder: L1 has overlapping ranges: file #73 largest key: '000000000031444F3030303030303030' seq:0, type:1 vs. file #78 smallest key: '00000000000011213030303030303030' seq:235741, type:1\nput error: Corruption: force_consistency_checks(DEBUG): VersionBuilder: L1 has overlapping ranges: file #73 largest key: '000000000031444F3030303030303030' seq:0, type:1 vs. file #78 smallest key: '00000000000011213030303030303030' seq:235741, type:1\nput error: Corruption: force_consistency_checks(DEBUG): VersionBuilder: L1 has overlapping ranges: file #73 largest key: '000000000031444F3030303030303030' seq:0, type:1 vs. file #78 smallest key: '00000000000011213030303030303030' seq:235741, type:1\nput error: Corruption: force_consistency_checks(DEBUG): VersionBuilder: L1 has overlapping ranges: file #73 largest key: '000000000031444F3030303030303030' seq:0, type:1 vs. file #78 smallest key: '00000000000011213030303030303030' seq:235741, type:1\nput error: Corruption: force_consistency_checks(DEBUG): VersionBuilder: L1 has overlapping ranges: file #73 largest key: '000000000031444F3030303030303030' seq:0, type:1 vs. file #78 smallest key: '00000000000011213030303030303030' seq:235741, type:1\nput error: Corruption: force_consistency_checks(DEBUG): VersionBuilder: L1 has overlapping ranges: file #73 largest key: '000000000031444F3030303030303030' seq:0, type:1 vs. file #78 smallest key: '00000000000011213030303030303030' seq:235741, type:1\nput error: Corruption: force_consistency_checks(DEBUG): VersionBuilder: L1 has overlapping ranges: file #73 largest key: '000000000031444F3030303030303030' seq:0, type:1 vs. file #78 smallest key: '00000000000011213030303030303030' seq:235741, type:1\n",
+      "wall_s": 5.045097351074219
+    },
+    "readrandom": {
+      "found": 0,
+      "wall_s": 0.7,
+      "db_bytes": 44531
+    }
+  }
+}
