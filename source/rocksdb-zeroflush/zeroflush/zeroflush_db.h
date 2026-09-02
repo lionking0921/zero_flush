@@ -93,6 +93,11 @@ struct ZeroFlushOptions {
   // 55.4K，+8.4%）、fallback 减半、停写 1.3%。
   bool skip_batching = true;
 
+  // ---- M4.2 物化免排序 ----
+  // A 侧构建优先用冻结 slim 索引序 + D1 整段读（免 WalScanner 整读 +
+  // std::sort）。默认开；false = 恒回落原路径（性能 A/B / 规避用）。
+  bool materialize_sort_assist = true;
+
   // ---- M4.3 终态 ----
   // M4.3d-2：分区索引总内存预算（背压触发 freeze；默认 4GB ≈ 6~8 千万
   // key 窗口，与 M4.1 的 write_buffer 语义对齐）。M4.4b：旧路径

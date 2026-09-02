@@ -265,6 +265,21 @@ class ZfMaterializeJob {
   int PickInstallLevel(const ROCKSDB_NAMESPACE::InternalKey& smallest,
                        const ROCKSDB_NAMESPACE::InternalKey& largest) const;
 
+  // M4.2 接入：A 侧"冻结 slim 索引免排序"构建。本分区 gens 每代的 frozen
+  // PartitionIndex 由写路径与分区 WAL 同步建立（M4.3），条目天然按 internal
+  // comparator 有序（user key 升 / seq 降）——无需 WalScanner 逐条读 + 物化
+  // 排序。D1 整段读该代封存 WAL + locator.offset 内存二分取 value，全程不
+  // 调用任何 key 比较器。多代（孤儿/攒批收养）各自有序 → 内部按 internal
+  // comparator 线性归并成单一有序流（每步仅比较各 run 头，非全量排序）。
+  // 完整性失败 / 索引缺失 / 整段读失败 → 返回 false，调用方回落原路径
+  // （WalScanner + BuildSortKeys，语义不变）。成功时 keys/values 已按
+  // internal comparator 有序，且写出 *min_seq（可为 nullptr 忽略）。
+  // 受 ZeroFlushOptions::materialize_sort_assist 开关控制（false = 恒回落）。
+  bool BuildAsideFromFrozenIndex(
+      const std::vector<std::pair<uint32_t, uint32_t>>& gens,
+      std::vector<std::string>* keys, std::vector<std::string>* values,
+      uint64_t* min_seq) const;
+
   // M4.5b：kSkip 攒批的上限——同一分区最多攒一代（≥上限强制物化，
   // 保证数据最终收敛到 SST，不被 ratio 拒绝无限推迟）。
   static constexpr uint32_t kMaxSkipGenerations = 2;

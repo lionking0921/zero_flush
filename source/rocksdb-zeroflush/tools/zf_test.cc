@@ -19,6 +19,7 @@
 //   0   全部通过
 //   >0  失败用例数
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdint>
 #include <cstdlib>
@@ -39,13 +40,17 @@
 #include "rocksdb/db.h"
 #include "rocksdb/iterator.h"
 #include "rocksdb/options.h"
+#include "rocksdb/comparator.h"
+#include "rocksdb/env.h"
 #include "utilities/merge_operators.h"
 #include "db/dbformat.h"
 #include "memory/arena.h"
 #include "table/merging_iterator.h"
+#include "zeroflush/materialize_aside.h"
 #include "zeroflush/partition_index.h"
 #include "zeroflush/partition_table.h"
 #include "zeroflush/wal_format.h"
+#include "zeroflush/wal_manager.h"
 #include "zeroflush/zeroflush_db.h"
 
 namespace {
@@ -3624,6 +3629,295 @@ void TestSkipBatchMaterialize() {
   ReportResult(tag, true, "skip-batch zero-L0 end-to-end");
 }
 
+// ---- M4.2 协助排序模块验证（拆分模块，不接入系统读写/物化路径）----
+// 在裸目录 + PartitionedWalManager + PartitionIndexSet 上，用真实写原语
+// （复刻 ZeroFlushContext::AddRecord 的 Append+Insert 两行，避开路由/mem）
+// 构造一个封存 gen 的成对输入 = {封存 WAL（gen0 文件留盘）+ 冻结 slim 索引}，
+// 断言 DrainPartitionAside（按冻结 slim 索引免排序）与 BuildWalSortedAside
+// （WAL 整读 + InternalKeyComparator 排序）输出逐字节一致（bytewise 与非
+// bytewise user comparator 均验证）→ 证明「冻结索引序 == 物化所需 comparator
+// 序」，排序可免。
+using zeroflush::BuildWalSortedAside;
+using zeroflush::DrainPartitionAside;
+using zeroflush::FreezeResult;
+using zeroflush::PartitionIndexSet;
+using zeroflush::PartitionedWalManager;
+using zeroflush::SealedGenBuffer;
+using zeroflush::SlimLocator;
+using zeroflush::WalRecordRef;
+using zeroflush::ZfKeyComparator;
+
+// 单条记录（内容序定义；seq 为该代真实全局序的一部分，构造时递增）。
+struct AsideRec {
+  uint64_t seq;
+  std::string key;
+  std::string value;
+  uint8_t type;
+};
+
+// 确定性伪随机置换（固定种子常量；不依赖 <random>/时间，杜绝 flaky）。
+static void AsideShuffle(std::vector<size_t>& order) {
+  uint64_t s = 0x9E3779B97F4A7C15ULL;
+  for (size_t i = order.size(); i > 1; --i) {
+    s = s * 6364136223846793005ULL + 1442695040888963407ULL;
+    const size_t j = static_cast<size_t>(s % i);
+    std::swap(order[i - 1], order[j]);
+  }
+}
+
+// 数值 user key：4B 大端 → bytewise 升序 = 数值升序；reverse comparator 升序 =
+// 数值降序。仅作确定性键空间，与具体 comparator 无关。
+static std::string AsideNumKey(uint32_t i) {
+  std::string k(4, '\0');
+  k[0] = static_cast<char>(i >> 24);
+  k[1] = static_cast<char>(i >> 16);
+  k[2] = static_cast<char>(i >> 8);
+  k[3] = static_cast<char>(i);
+  return k;
+}
+
+static std::string AsideVal(uint32_t i, uint32_t ver) {
+  if (ver == 0 && (i % 97) == 0) {
+    return "";  // 空 value（拷贝/编码边界）
+  }
+  std::string v = "v" + std::to_string(i) + "." + std::to_string(ver);
+  if ((i + ver) % 5 == 0) {
+    v.push_back(static_cast<char>(0x00));  // 内嵌 '\0' 二进制 value
+  }
+  return v;
+}
+
+// 内容序数据集：版本栈（同 key 多版本，≥ 32 版/栈，验证 user 升/seq 降；delete
+// 收尾穿插）+ 单版本 distinct key。约 139k 条（排序耗时可测）。
+static void BuildAsideRecords(std::vector<AsideRec>* recs) {
+  recs->clear();
+  uint64_t seq = 1;
+  constexpr uint32_t kVersionedBase = 4096;  // 版本栈 key 数
+  constexpr uint32_t kVersions = 32;         // 每栈版本数
+  constexpr uint32_t kSingletonBase = 8192;  // 单版本 distinct key 数
+  for (uint32_t i = 0; i < kVersionedBase; ++i) {
+    const std::string key = AsideNumKey(i);
+    for (uint32_t ver = 0; ver < kVersions; ++ver) {
+      const bool del = (ver == kVersions - 1) && (i % 3 == 0);
+      AsideRec r;
+      r.seq = seq++;
+      r.key = key;
+      r.value = del ? "" : AsideVal(i, ver);
+      r.type = del ? static_cast<uint8_t>(rocksdb::kTypeDeletion)
+                   : static_cast<uint8_t>(rocksdb::kTypeValue);
+      recs->push_back(std::move(r));
+    }
+  }
+  for (uint32_t i = kVersionedBase; i < kVersionedBase + kSingletonBase; ++i) {
+    AsideRec r;
+    r.seq = seq++;
+    r.key = AsideNumKey(i);
+    r.value = AsideVal(i, 0);
+    r.type = static_cast<uint8_t>(rocksdb::kTypeValue);
+    recs->push_back(std::move(r));
+  }
+}
+
+// 填一个真实 gen + 冻结索引，跑 DrainPartitionAside vs BuildWalSortedAside。
+// 返回 false 时 detail 携带首错。S3：抽样用独立定点读（ReadFromSealed）交叉
+// 校验 locator→value（对照 D1 整段缓冲）。
+static bool VerifyAsideEquivalence(rocksdb::Env* env, const std::string& wal_dir,
+                                   const rocksdb::Comparator* ucmp,
+                                   const std::vector<AsideRec>& recs,
+                                   std::string* detail) {
+  const uint32_t part = 0;
+  // P=8 分区管理器（只用分区 0；target 随意，本测试不触发封存判定）。
+  PartitionedWalManager wal(env, wal_dir, /*partitions=*/8,
+                            /*partition_target_bytes=*/1ull << 30);
+  auto s = wal.Open();
+  if (!s.ok()) {
+    *detail = "wal open: " + s.ToString();
+    return false;
+  }
+
+  const rocksdb::InternalKeyComparator icmp(ucmp);
+  const ZfKeyComparator zcmp(icmp);
+  PartitionIndexSet set(zcmp);
+
+  // 写序 = 内容序的确定性置换（WAL 内非有序写，考验"两条路径各自排序"）。
+  std::vector<size_t> order(recs.size());
+  for (size_t i = 0; i < order.size(); ++i) {
+    order[i] = i;
+  }
+  AsideShuffle(order);
+  for (const size_t i : order) {
+    const AsideRec& r = recs[i];
+    WalRecordRef ref;
+    s = wal.Append(part, r.key, r.value, r.type, r.seq, &ref);
+    if (!s.ok()) {
+      *detail = "append: " + s.ToString();
+      return false;
+    }
+    std::string ik;
+    ik.reserve(r.key.size() + 8);
+    ik.append(r.key.data(), r.key.size());
+    rocksdb::PutFixed64(
+        &ik, rocksdb::PackSequenceAndType(
+                 r.seq, static_cast<rocksdb::ValueType>(r.type)));
+    const SlimLocator loc{ref.part_id, ref.gen, ref.offset};
+    const rocksdb::Slice loc_slice(reinterpret_cast<const char*>(&loc),
+                                   sizeof(loc));
+    if (set.Insert(ref.part_id, ref.gen, ik, loc_slice) == 0) {
+      *detail = "dup insert seq=" + std::to_string(r.seq);
+      return false;
+    }
+  }
+
+  // 封存该分区：WAL gen0 封存留盘 + 索引冻结（gen0 数据 → frozen，gen 换代）。
+  const FreezeResult fr = wal.Freeze(part);
+  if (fr.old_gen != 0 || fr.sealed_bytes == 0) {
+    *detail = "freeze gen";
+    return false;
+  }
+  set.Freeze(part, /*new_gen=*/1);
+  auto idx = set.GetFrozen(part, 0);
+  if (!idx || !idx->frozen()) {
+    *detail = "no frozen idx gen0";
+    return false;
+  }
+
+  SealedGenBuffer buf;
+  s = buf.Load(env, wal_dir, part, 0);
+  if (!s.ok()) {
+    *detail = "D1 load: " + s.ToString();
+    return false;
+  }
+  if (buf.record_count() != recs.size()) {
+    *detail = "D1 count " + std::to_string(buf.record_count());
+    return false;
+  }
+
+  // 主路径：DrainPartitionAside（按冻结 slim 索引免排序）。
+  const uint64_t t0 = env->NowMicros();
+  std::vector<std::string> dk, dv;
+  uint64_t dmin = 0;
+  s = DrainPartitionAside(*idx, buf, part, 0, &dk, &dv, &dmin);
+  const uint64_t drain_us = env->NowMicros() - t0;
+  if (!s.ok()) {
+    *detail = "drain: " + s.ToString();
+    return false;
+  }
+
+  // 参考路径：BuildWalSortedAside（WAL 整读 + InternalKeyComparator 排序）。
+  const uint64_t t1 = env->NowMicros();
+  std::vector<std::string> rk, rv;
+  uint64_t rmin = 0;
+  s = BuildWalSortedAside(env, wal_dir, part, 0, icmp, &rk, &rv, &rmin);
+  const uint64_t ref_us = env->NowMicros() - t1;
+  if (!s.ok()) {
+    *detail = "wal+sort: " + s.ToString();
+    return false;
+  }
+
+  // S3：抽样交叉校验 locator→value（独立定点读 ReadFromSealed == D1 缓冲）。
+  {
+    std::unique_ptr<rocksdb::RandomAccessFile> rf;
+    rocksdb::EnvOptions eo;
+    s = env->NewRandomAccessFile(wal_dir + "/zf-wal-0-0.log", &rf, eo);
+    if (!s.ok()) {
+      *detail = "open gen0 raf: " + s.ToString();
+      return false;
+    }
+    uint64_t cnt = 0;
+    bool bad = false;
+    idx->ForEachEntry([&](const rocksdb::Slice&, const rocksdb::Slice& loc) {
+      if (bad) {
+        return;
+      }
+      if (loc.size() != sizeof(SlimLocator)) {
+        bad = true;
+        return;
+      }
+      if (cnt < 32 || (cnt % 1009) == 0) {  // 抽样：前 32 条 + 每 1009 条 1 条
+        SlimLocator ll;
+        std::memcpy(&ll, loc.data(), sizeof(ll));
+        const WalRecordRef ref{ll.part_id, ll.gen, ll.wal_offset};
+        std::string b1, b2;
+        rocksdb::Slice sv;
+        if (!PartitionedWalManager::ReadFromSealed(rf.get(), ref, &b1, &sv).ok()) {
+          bad = true;
+          return;
+        }
+        if (!buf.GetValue(ll.wal_offset, &b2)) {
+          bad = true;
+          return;
+        }
+        if (sv.ToString() != b2) {
+          bad = true;
+          return;
+        }
+      }
+      ++cnt;
+    });
+    if (bad) {
+      *detail = "S3 locator->value cross-check mismatch";
+      return false;
+    }
+  }
+
+  // 逐字节对拍（含顺序）。
+  if (dk.size() != rk.size() || dk.size() != recs.size()) {
+    *detail = "size drain=" + std::to_string(dk.size()) +
+              " ref=" + std::to_string(rk.size());
+    return false;
+  }
+  for (size_t i = 0; i < dk.size(); ++i) {
+    if (dk[i] != rk[i] || dv[i] != rv[i]) {
+      *detail = "mismatch @" + std::to_string(i);
+      return false;
+    }
+  }
+  if (dmin != rmin) {
+    *detail = "min_seq drain=" + std::to_string(dmin) +
+              " ref=" + std::to_string(rmin);
+    return false;
+  }
+
+  fprintf(stderr,
+          "      [aside] %zu recs | drain(slim-index 免排序) %llu us | "
+          "ref(WAL+sort) %llu us | min_seq %llu\n",
+          dk.size(), (unsigned long long)drain_us,
+          (unsigned long long)ref_us, (unsigned long long)dmin);
+  return true;
+}
+
+void TestSlimIndexSortAssist() {
+  const char* tag = "SlimIndexSortAssist";
+  rocksdb::Env* env = rocksdb::Env::Default();
+  std::vector<AsideRec> recs;
+  BuildAsideRecords(&recs);
+
+  const char* cases[2] = {"bytewise", "reverse_cmp"};
+  const rocksdb::Comparator* ucmps[2] = {rocksdb::BytewiseComparator(),
+                                         rocksdb::ReverseBytewiseComparator()};
+  for (int c = 0; c < 2; ++c) {
+    const std::string base =
+        std::string(kDbBase) + "sortassist_" + cases[c];
+    const std::string wal_dir = base + "/zfwal";
+    CleanDB(base);
+    if (!env->CreateDir(base).ok() && !DirExists(base)) {
+      ReportResult(tag, false, "create dir " + base);
+      return;
+    }
+    std::string detail;
+    // wal.Open() 内 CreateDirIfMissing 建 zfwal 子目录。
+    const bool ok = VerifyAsideEquivalence(env, wal_dir, ucmps[c], recs, &detail);
+    CleanDB(base);
+    if (!ok) {
+      ReportResult(tag, false, std::string(cases[c]) + ": " + detail);
+      return;
+    }
+  }
+  ReportResult(tag, true,
+               "slim-index order == comparator order（bytewise + reverse），"
+               "drain 免排序且取值等价");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -3701,6 +3995,9 @@ int main(int argc, char** argv) {
 
   // ---- M4.5b 新增 ----
   run("SkipBatchMaterialize",       TestSkipBatchMaterialize);
+
+  // ---- M4.2 协助排序模块验证（拆分，不接入系统路径）----
+  run("SlimIndexSortAssist",        TestSlimIndexSortAssist);
 
   fprintf(stderr, "============================================================\n");
   if (g_failures == 0) {

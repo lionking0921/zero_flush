@@ -855,6 +855,10 @@ DEFINE_bool(zf_skip_batching, true,
             "ZeroFlush M4.5b: kSkip batch materialization (skip low-ratio "
             "partitions, adopt next epoch for multi-gen merge). Default on "
             "(M4.6c retest: 50GB +8.4%, 2.2GB +28%, data intact).");
+DEFINE_bool(zf_sort_assist, true,
+            "ZeroFlush M4.2: materialize A-side from frozen slim index order "
+            "+ whole-gen buffer (skip WalScanner + std::sort). false = always "
+            "fall back to the original sort path (perf A/B).");
 DEFINE_int64(zf_value_cache_mb, 0,
              "ZeroFlush M4.7b: value cache size in MB (locator-keyed LRU "
              "for WAL point reads; 0 = off).");
@@ -5514,6 +5518,7 @@ class Benchmark {
       }
       zfo.merge_into_base_level = FLAGS_zf_base_merge;
       zfo.skip_batching = FLAGS_zf_skip_batching;
+      zfo.materialize_sort_assist = FLAGS_zf_sort_assist;
       zfo.l0_parallelism =
           static_cast<uint32_t>(std::max(1, FLAGS_zf_l0_parallelism));
       if (FLAGS_zf_value_cache_mb > 0) {

@@ -108,6 +108,27 @@ class PartitionIndex {
     }
   }
 
+  // M4.2：遍历全部条目的 (internal key, locator)（协助排序模块输入用——
+  // 物化免排序 drain 需同时取 key 与 locator）。等价于 ForEachKey 但额外
+  // 解码 16B locator 切片（纯内存，无 IO）。与 ForEachKey 同构：并发插入下
+  // 可能漏正在插入的节点（概率低，与布隆重建的已知竞态一致）。
+  void ForEachEntry(
+      const std::function<void(const ROCKSDB_NAMESPACE::Slice& ik,
+                               const ROCKSDB_NAMESPACE::Slice& locator)>& fn) const {
+    Iterator iter(&list_);
+    for (iter.SeekToFirst(); iter.Valid(); iter.Next()) {
+      const char* entry = iter.key();
+      uint32_t ik_len = 0;
+      const char* p = ROCKSDB_NAMESPACE::GetVarint32Ptr(entry, entry + 5, &ik_len);
+      if (p == nullptr || ik_len == 0) {
+        continue;
+      }
+      const ROCKSDB_NAMESPACE::Slice ik(p, ik_len);
+      p += ik_len;
+      fn(ik, ROCKSDB_NAMESPACE::GetLengthPrefixedSlice(p));
+    }
+  }
+
   // M3.4：range tombstone 覆盖——找 ≤ user_key 的最大 begin 条目。
   // end 从 WAL 读（read_value 回调——条目的 value 字段是 16B locator，
   // 不是 end；end 是 AddRecord 的 value 存于 WAL）。
@@ -692,6 +713,24 @@ class PartitionIndexSet {
     for (const auto& idx : it->second) {
       fn(idx);
     }
+  }
+
+  // M4.2：取分区 p 的 gen 冻结索引（不存在返回 nullptr）。shared_ptr 拷贝
+  // 保活——并发 ReleaseFrozen（物化回收）期间返回的索引仍可用。
+  // 物化免排序的"每分区 slim 跳表"输入按 (part, gen) 获取用。
+  std::shared_ptr<PartitionIndex> GetFrozen(uint32_t part_id,
+                                            uint32_t gen) const {
+    std::shared_lock<std::shared_mutex> l(mu_);
+    auto it = frozen_.find(part_id);
+    if (it == frozen_.end()) {
+      return nullptr;
+    }
+    for (const auto& idx : it->second) {
+      if (idx->gen() == gen) {
+        return idx;
+      }
+    }
+    return nullptr;
   }
 
   // M4.3d-3：迭代器支持——遍历全部分区的 active + frozen 索引，

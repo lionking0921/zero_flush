@@ -49,6 +49,7 @@
 #include "table/unique_id_impl.h"
 #include "util/coding.h"
 #include "util/vector_iterator.h"
+#include "zeroflush/materialize_aside.h"  // M4.2 接入：SealedGenBuffer / DrainPartitionAside
 #include "zeroflush/wal_format.h"
 #include "zeroflush/wal_manager.h"
 #include "zeroflush/zeroflush_db.h"
@@ -886,44 +887,157 @@ const ZfMaterializeJob::PartitionPlan* ZfMaterializeJob::FindPlan(
   return (it != plans_.end() && it->part_id == part_id) ? &*it : nullptr;
 }
 
+// M4.2 接入：A 侧"冻结 slim 索引免排序"构建（见 materialize_job.h 注释）。
+bool ZfMaterializeJob::BuildAsideFromFrozenIndex(
+    const std::vector<std::pair<uint32_t, uint32_t>>& gens,
+    std::vector<std::string>* keys, std::vector<std::string>* values,
+    uint64_t* min_seq) const {
+  if (!ctx_->zfo_.materialize_sort_assist) {
+    return false;  // 开关关闭：恒回落 WalScanner + 排序原路径
+  }
+  keys->clear();
+  values->clear();
+  struct Run {
+    std::vector<std::string> keys;
+    std::vector<std::string> values;
+  };
+  std::vector<Run> runs;
+  runs.reserve(gens.size());
+  uint64_t mn = ROCKSDB_NAMESPACE::kMaxSequenceNumber;
+  for (const auto& [p, gen] : gens) {
+    // 物化在 ReleaseEpoch（物化完成回收 → ReleaseFrozenIndexes）之前运行，
+    // (p, gen) 的 frozen 索引仍在链上；缺失即回落（并发/回收时序异常时安全）。
+    std::shared_ptr<PartitionIndex> idx = ctx_->index_set()->GetFrozen(p, gen);
+    if (idx == nullptr) {
+      return false;
+    }
+    // D1 整段读该代封存 WAL（与 WalScanner 顺序扫同一文件；封存后只读）。
+    SealedGenBuffer buf;
+    ROCKSDB_NAMESPACE::Status s =
+        buf.Load(mc_.db_options->env, ctx_->wal_dir(), p, gen);
+    if (!s.ok()) {
+      return false;  // 整段读失败：回落（原路径同样会失败并报具体错）
+    }
+    Run run;
+    uint64_t rmin = ROCKSDB_NAMESPACE::kMaxSequenceNumber;
+    s = DrainPartitionAside(*idx, buf, p, gen, &run.keys, &run.values, &rmin);
+    if (!s.ok()) {
+      return false;  // 完整性失败：回落 WalScanner + 排序（正确性优先）
+    }
+    if (rmin < mn) {
+      mn = rmin;
+    }
+    if (!run.keys.empty()) {
+      runs.push_back(std::move(run));
+    }
+  }
+  // 汇总：单代直接复用有序 run；多代（各自有序）按 internal comparator 归并
+  // （每 ik 的 seq 全局唯一 → 全序无并列，归并 = 全量排序的等价结果）。
+  const ROCKSDB_NAMESPACE::InternalKeyComparator& icmp =
+      mc_.cfd->internal_comparator();
+  if (runs.empty()) {
+    if (min_seq != nullptr) {
+      *min_seq = mn;
+    }
+    return true;  // 空分区：与 WalScanner 路径一致产出空 A 侧（调用方返回 OK）
+  }
+  size_t total = 0;
+  for (const Run& r : runs) {
+    total += r.keys.size();
+  }
+  keys->reserve(total);
+  values->reserve(total);
+  if (runs.size() == 1) {
+    *keys = std::move(runs[0].keys);
+    *values = std::move(runs[0].values);
+  } else {
+    std::vector<size_t> pos(runs.size(), 0);
+    while (true) {
+      size_t best = runs.size();
+      for (size_t i = 0; i < runs.size(); ++i) {
+        if (pos[i] < runs[i].keys.size()) {
+          best = i;
+          break;
+        }
+      }
+      if (best == runs.size()) {
+        break;
+      }
+      for (size_t i = best + 1; i < runs.size(); ++i) {
+        if (pos[i] >= runs[i].keys.size()) {
+          continue;
+        }
+        if (icmp.Compare(ROCKSDB_NAMESPACE::Slice(runs[i].keys[pos[i]]),
+                         ROCKSDB_NAMESPACE::Slice(
+                             runs[best].keys[pos[best]])) < 0) {
+          best = i;
+        }
+      }
+      keys->push_back(std::move(runs[best].keys[pos[best]]));
+      values->push_back(std::move(runs[best].values[pos[best]]));
+      ++pos[best];
+    }
+  }
+  if (min_seq != nullptr) {
+    *min_seq = mn;
+  }
+  return true;
+}
+
 ROCKSDB_NAMESPACE::Status ZfMaterializeJob::MaterializePartition(
     uint32_t part_id, const std::vector<std::pair<uint32_t, uint32_t>>& gens,
     const ROCKSDB_NAMESPACE::Slice& lo, const ROCKSDB_NAMESPACE::Slice& hi) {
   assert(!gens.empty());
 
-  // 顺序整读该分区全部代（按 gen 升序 = 写入序）。
+  // ---- A 侧构建 ----
+  // M4.2 接入：优先"冻结 slim 索引免排序"路径——本分区封存代的 frozen
+  // PartitionIndex（M4.3 写路径与分区 WAL 同步写入）天然按 internal
+  // comparator 有序，D1 整段读封存 WAL + locator.offset 二分取 value，免去
+  // WalScanner 逐条读 + 物化排序（实测排序是物化耗时大头）。完整性失败 /
+  // 索引缺失 / 整段读失败即回落原路径（WalScanner 顺序整读 + M4.6e 编码键
+  // memcmp 排序），语义与改动前一致。aside_sorted 标记 A 侧已有序，下游
+  // VectorIterator 据此不再重复排序。
   std::vector<std::string> keys;
   std::vector<std::string> values;
-  for (const auto& [p, gen] : gens) {
-    WalScanner scanner(mc_.db_options->env, ctx_->wal_dir(), p, gen,
-                       mc_.db_options->info_log.get());
-    ZfRecordHeader h;
-    rocksdb::Slice key, value;
-    while (scanner.Next(&h, &key, &value)) {
-      keys.push_back(MakeInternalKey(key, h.seq, h.type));
-      values.emplace_back(value.data(), value.size());
+  bool aside_sorted = false;
+  if (BuildAsideFromFrozenIndex(gens, &keys, &values, nullptr)) {
+    aside_sorted = true;
+  } else {
+    // 回落路径：顺序整读该分区全部代（按 gen 升序 = 写入序）。
+    for (const auto& [p, gen] : gens) {
+      WalScanner scanner(mc_.db_options->env, ctx_->wal_dir(), p, gen,
+                         mc_.db_options->info_log.get());
+      ZfRecordHeader h;
+      rocksdb::Slice key, value;
+      while (scanner.Next(&h, &key, &value)) {
+        keys.push_back(MakeInternalKey(key, h.seq, h.type));
+        values.emplace_back(value.data(), value.size());
+      }
+      // M3.2：物化严格要求已封存文件完整（区别于恢复路径的宽容语义）。
+      if (!scanner.status().ok()) {
+        return ROCKSDB_NAMESPACE::Status::Corruption(
+            "ZF sealed WAL scan failed: " + scanner.status().ToString());
+      }
     }
-    // M3.2：物化严格要求已封存文件完整（区别于恢复路径的宽容语义）。
-    if (!scanner.status().ok()) {
-      return ROCKSDB_NAMESPACE::Status::Corruption(
-          "ZF sealed WAL scan failed: " + scanner.status().ToString());
+    if (keys.empty()) {
+      return ROCKSDB_NAMESPACE::Status::OK();  // 空分区不产出 SST
     }
+    // 排序（M4.6e：Bytewise 时编码排序键 + memcmp 索引排序——InternalKey
+    // Comparator 的逐次解析是物化排序大头；非 Bytewise 走原 VectorIterator
+    // 排序）。仅回落路径计入 sort_micros。
+    const uint64_t sort_start = mc_.db_options->clock->NowMicros();
+    std::string sort_buf;
+    std::vector<size_t> sort_off;
+    if (BuildSortKeys(keys, mc_.cfd->user_comparator(), &sort_buf, &sort_off)) {
+      ReorderBySortKeys(&keys, &values, sort_buf, sort_off);
+      aside_sorted = true;
+    }
+    sort_micros_.fetch_add(mc_.db_options->clock->NowMicros() - sort_start,
+                           std::memory_order_relaxed);
   }
   if (keys.empty()) {
     return ROCKSDB_NAMESPACE::Status::OK();  // 空分区不产出 SST
   }
-
-  // 排序（M4.6e：Bytewise 时编码排序键 + memcmp 索引排序——InternalKey
-  // Comparator 的逐次解析是物化排序大头；非 Bytewise 走原 VectorIterator
-  // 排序）。
-  const uint64_t sort_start = mc_.db_options->clock->NowMicros();
-  std::string sort_buf;
-  std::vector<size_t> sort_off;
-  if (BuildSortKeys(keys, mc_.cfd->user_comparator(), &sort_buf, &sort_off)) {
-    ReorderBySortKeys(&keys, &values, sort_buf, sort_off);
-  }
-  sort_micros_.fetch_add(mc_.db_options->clock->NowMicros() - sort_start,
-                         std::memory_order_relaxed);
 
   // M4.11：hash 遗留切片判定——必须在构造 VectorIterator（move keys）之前。
   // hash 遗留 = 分区数据 key 范围超出分区边界（epoch 1 hash 表写入的全
@@ -1067,7 +1181,7 @@ ROCKSDB_NAMESPACE::Status ZfMaterializeJob::MaterializePartition(
         std::unique_ptr<ROCKSDB_NAMESPACE::VectorIterator> vit(
             new ROCKSDB_NAMESPACE::VectorIterator(
                 std::move(k2), std::move(v2),
-                sort_buf.empty() ? &mc_.cfd->internal_comparator() : nullptr));
+                aside_sorted ? nullptr : &mc_.cfd->internal_comparator()));
         ROCKSDB_NAMESPACE::Status ss = build_one(std::move(vit));
         if (!ss.ok()) {
           return ss;
@@ -1082,7 +1196,7 @@ ROCKSDB_NAMESPACE::Status ZfMaterializeJob::MaterializePartition(
       std::unique_ptr<ROCKSDB_NAMESPACE::VectorIterator> vit(
           new ROCKSDB_NAMESPACE::VectorIterator(
               std::move(k2), std::move(v2),
-              sort_buf.empty() ? &mc_.cfd->internal_comparator() : nullptr));
+              aside_sorted ? nullptr : &mc_.cfd->internal_comparator()));
       ROCKSDB_NAMESPACE::Status ss = build_one(std::move(vit));
       if (!ss.ok()) {
         return ss;
@@ -1095,7 +1209,7 @@ ROCKSDB_NAMESPACE::Status ZfMaterializeJob::MaterializePartition(
   std::unique_ptr<ROCKSDB_NAMESPACE::VectorIterator> iter(
       new ROCKSDB_NAMESPACE::VectorIterator(
           std::move(keys), std::move(values),
-          sort_buf.empty() ? &mc_.cfd->internal_comparator() : nullptr));
+          aside_sorted ? nullptr : &mc_.cfd->internal_comparator()));
   iter->SeekToFirst();
   assert(iter->Valid());
   return build_one(std::move(iter));
@@ -1112,44 +1226,54 @@ ROCKSDB_NAMESPACE::Status ZfMaterializeJob::MaterializeMergePartition(
   assert(compaction != nullptr);
   const ROCKSDB_NAMESPACE::MutableCFOptions& mcf = *mc_.mutable_cf_options;
 
-  // ---- A 侧：顺序整读 + 排序（同 MaterializePartition；记录最小 seq）----
+  // ---- A 侧：优先"冻结 slim 索引免排序"（M4.2 接入；同 MaterializePartition，
+  // ---- 见 BuildAsideFromFrozenIndex 注释），失败回落 WalScanner + 排序 ----
   std::vector<std::string> keys;
   std::vector<std::string> values;
   uint64_t min_seq = ROCKSDB_NAMESPACE::kMaxSequenceNumber;
-  for (const auto& [p, gen] : gens) {
-    WalScanner scanner(mc_.db_options->env, ctx_->wal_dir(), p, gen,
-                       mc_.db_options->info_log.get());
-    ZfRecordHeader h;
-    rocksdb::Slice key, value;
-    while (scanner.Next(&h, &key, &value)) {
-      keys.push_back(MakeInternalKey(key, h.seq, h.type));
-      values.emplace_back(value.data(), value.size());
-      if (h.seq < min_seq) {
-        min_seq = h.seq;
+  bool aside_sorted = false;
+  if (BuildAsideFromFrozenIndex(gens, &keys, &values, &min_seq)) {
+    aside_sorted = true;
+  } else {
+    // 回落：顺序整读该分区全部代（按 gen 升序 = 写入序；记录最小 seq）。
+    for (const auto& [p, gen] : gens) {
+      WalScanner scanner(mc_.db_options->env, ctx_->wal_dir(), p, gen,
+                         mc_.db_options->info_log.get());
+      ZfRecordHeader h;
+      rocksdb::Slice key, value;
+      while (scanner.Next(&h, &key, &value)) {
+        keys.push_back(MakeInternalKey(key, h.seq, h.type));
+        values.emplace_back(value.data(), value.size());
+        if (h.seq < min_seq) {
+          min_seq = h.seq;
+        }
+      }
+      if (!scanner.status().ok()) {
+        return ROCKSDB_NAMESPACE::Status::Corruption(
+            "ZF sealed WAL scan failed: " + scanner.status().ToString());
       }
     }
-    if (!scanner.status().ok()) {
-      return ROCKSDB_NAMESPACE::Status::Corruption(
-          "ZF sealed WAL scan failed: " + scanner.status().ToString());
+    if (keys.empty()) {
+      return ROCKSDB_NAMESPACE::Status::OK();  // 空分区不产出 SST
     }
+    // M4.6e：同 MaterializePartition——Bytewise 时编码排序键 + memcmp 重排。
+    const uint64_t sort_start = mc_.db_options->clock->NowMicros();
+    std::string sort_buf;
+    std::vector<size_t> sort_off;
+    if (BuildSortKeys(keys, mc_.cfd->user_comparator(), &sort_buf, &sort_off)) {
+      ReorderBySortKeys(&keys, &values, sort_buf, sort_off);
+      aside_sorted = true;
+    }
+    sort_micros_.fetch_add(mc_.db_options->clock->NowMicros() - sort_start,
+                           std::memory_order_relaxed);
   }
   if (keys.empty()) {
     return ROCKSDB_NAMESPACE::Status::OK();  // 空分区不产出 SST
   }
-
-  // M4.6e：同 MaterializePartition——Bytewise 时编码排序键 + memcmp 重排。
-  const uint64_t sort_start = mc_.db_options->clock->NowMicros();
-  std::string sort_buf;
-  std::vector<size_t> sort_off;
-  if (BuildSortKeys(keys, mc_.cfd->user_comparator(), &sort_buf, &sort_off)) {
-    ReorderBySortKeys(&keys, &values, sort_buf, sort_off);
-  }
   std::unique_ptr<ROCKSDB_NAMESPACE::VectorIterator> a_iter(
       new ROCKSDB_NAMESPACE::VectorIterator(
           std::move(keys), std::move(values),
-          sort_buf.empty() ? &mc_.cfd->internal_comparator() : nullptr));
-  sort_micros_.fetch_add(mc_.db_options->clock->NowMicros() - sort_start,
-                         std::memory_order_relaxed);
+          aside_sorted ? nullptr : &mc_.cfd->internal_comparator()));
   a_iter->SeekToFirst();
   assert(a_iter->Valid());
 
