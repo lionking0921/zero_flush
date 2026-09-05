@@ -1,0 +1,24 @@
+# Vitis/v++ 构建中间产物（AcceleratorKernel 内部忽略）
+_x/
+build/*/krnl_vadd.xo
+build/*/krnl_vadd.xo.*
+build/*/krnl_vadd.log
+build/*/*.log
+# host 测试二进制由 make host 生成
+host/test_host_sw_emu
+host/test_host_hw
+# v++ 顶层杂散日志 / 备份
+*.backup.log
+*.log
+xcd.log
+# CPU 单测二进制
+test/zf_cpu_sim
+test/exp_putkey_data
+
+# v++ / sw_emu 运行与构建残留（体积大，不入库）
+.ipcache/
+.Xil/
+_x/
+host/.run/
+*.memory_map_file
+host/.ipcache/
