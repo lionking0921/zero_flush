@@ -259,6 +259,22 @@ class ZfMaterializeJob {
       const ROCKSDB_NAMESPACE::Slice& lo,
       const ROCKSDB_NAMESPACE::Slice& hi);
 
+  // F-2：CSD-FPGA A-only 直装卸载（物化免归并单代分区的整表输出路径）。
+  // 入参 keys/values 已按 internal comparator 有序（= aside_sorted）且源自单个
+  // 封存代 (part_id, gen)（多代/切片由调用方 gate 排除）。资格链：
+  //   BuildCsdSlotAFromSorted 字节级资格（user 恰 24B / value ≤ 1024B）→
+  //   注册的 CSD 会话可用 → 设备 run（mode=1，kv_sum = 精确条数）→ 单文件
+  //   契约 + pps[1] == 条数复核 → PPS→manifest → ZfSeal 封口落盘 → 与 host
+  //   build_one 同构的 MaterializeOutput（meta only）入 outputs_。
+  // 任一失败：清理已建文件 + csd_fallbacks++ + 返回 false（调用方回落 host
+  //   build_one；绝不静默错排）。计数：csd_attempts/files 于内部推进。
+  // 线程安全：任务池无锁 worker 调用；NewFileNumber 单 job 串行（输出互斥
+  // out_mu_ 保护）。受 ZeroFlushOptions::csd_materialize 门控（false 时不可达）。
+  bool TryCsdDirectMaterialize(
+      uint32_t part_id, uint32_t gen,
+      const std::vector<std::string>& keys,
+      const std::vector<std::string>& values);
+
   // 定层（须持 DB mutex）：base_level 直装或回落 L0（M3.2 范围，§3.2 流图）。
   // 可安装 ⟺ L0..base_level 均无文件与本文件 user key 范围重叠
   // （含本批次已放置文件，跨 epoch 的 ABA 防护）。

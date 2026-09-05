@@ -252,3 +252,43 @@ g++ -std=c++17 -O1 -pthread -DHLS_STREAM_THREAD_SAFE -I ../kernel -I ../host \
   判定留待下个里程碑。
 - 引擎树零改动、旧目录（`../AcceleratorKernel/`、`../AcceleratorKernelWalPrefetch/`）零改动。
 
+---
+
+# E·F：hw 综合 + 引擎深接 CSD（真卡物化卸载）
+
+> 把 AB 的软件级证明推上真卡并把引擎写侧物化接到该内核。全程详情见
+> `../../docs/ZF_MilestoneEFG_CSD_Final_Report.md`。内核零改动。
+
+## E：hw 综合 + 真卡端到端
+
+- **E-1 综合**：`make TARGET=hw xclbin`（目标 `xilinx_u2_gen3x4_xdma_gc_2_202110_1`、
+  200 MHz、`sdx_optimization_effort_high`）。产物 `build/hw/krnl_vadd.xclbin`。
+- **E-2 host A+B 运行模式**（已就绪）：`main_zf` 增 `--ab <dump_dir>`——夹具 `dump/ab_host/`
+  （7 case：`.desc` 槽表 + `.s<i>` 槽字节 + CPU-sim `.prefix/.expect` 对拍目标）自包含，
+  `RunAbDevice` 现算 A staged、直喂 slot 字节，mode=1 逐 case 与 CPU-sim 前缀**逐字节对拍**。
+- **E-3 真卡运行**（待 xclbin）：
+  ```bash
+  # (a) M3 默认 8 case 真卡回归（对 sw_emu 基线）       # (b) AB 7 case 前缀对拍
+  ./host/test_host_hw -x build/hw/krnl_vadd.xclbin -d 0
+  ./host/test_host_hw -x build/hw/krnl_vadd.xclbin -d 0 --ab dump/ab_host
+  ```
+
+## F：引擎深接 CSD（写档锁 + 物化接缝 + 双后端等价）
+
+- **F-1 §14.6 写档锁**：`zeroflush_db.cc` `Open()` 单点锁 `format_version=2/kCRC32c/
+  kBinarySearch/kNoCompression`（其余默认 restart=16、无 filter/partition index）——引擎自产
+  分区 SST 与 decoder_sst 同档互解。
+- **F-2 CSD 开关 + 接缝**：`ZeroFlushOptions{csd_materialize,csd_xclbin,csd_device}`（缺省关）；
+  `zeroflush/csd_backend.{h,cc}`（打包/资格/会话工厂，引擎 lib XRT-free）；
+  `zeroflush/csd_session_opencl.cc`（**只进带设备目标**，`cl2.hpp` map 直读写照 main_zf）。
+  `materialize_job.cc` 输出口改走 `TryCsdDirectMaterialize`：A-only 单文件档、`pps[1]==n` 强校验、
+  失败/设备不可用恒回落 host `BuildTable`（计数 `csd_files/attempts/fallbacks` 可证，零静默错排）。
+- **F-3 `zf_csd_test`**（`tools/`，链 XRT）：csd=off/csd=on 双 DB 同一 1920 键可写集 → 物化 →
+  全键 Get / 全扫描 / Close+Reopen 重扫（CRC 强校验直读）逐条等价。**host 回落模式 8/8 全绿**
+  （csd 库 `files=0 fallbacks=216`，证明接缝可达且零错排）；`zf_test` 回归 36 PASS/3 项既有 L0
+  失败（与本任务无关）不变。
+  ```bash
+  cd ../source/rocksdb-zeroflush
+  ./build/zf_csd_test                          # host 回落等价（无设备）
+  ./build/zf_csd_test --xclbin ../AcceleratorKernelSstV2/build/hw/krnl_vadd.xclbin --device 0  # 真卡卸载
+  ```

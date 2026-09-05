@@ -42,13 +42,19 @@
 #include "options/cf_options.h"
 #include "options/db_options.h"
 #include "rocksdb/file_system.h"
+#include "rocksdb/table.h"
 #include "rocksdb/types.h"
+#include "table/block_based/block_based_table_factory.h"
 #include "table/merging_iterator.h"
 #include "table/table_builder.h"
 #include "table/table_reader.h"
 #include "table/unique_id_impl.h"
 #include "util/coding.h"
 #include "util/vector_iterator.h"
+// F-2：CSD-FPGA 物化卸载 —— 字节打包/会话接缝（csd_backend.h）与封口器
+// （zf_seal.h，props/metaindex/footer 逐字段镜像引擎 builder）。
+#include "zeroflush/csd_backend.h"
+#include "zeroflush/zf_seal.h"
 #include "zeroflush/materialize_aside.h"  // M4.2 接入：SealedGenBuffer / DrainPartitionAside
 #include "zeroflush/wal_format.h"
 #include "zeroflush/wal_manager.h"
@@ -1205,6 +1211,18 @@ ROCKSDB_NAMESPACE::Status ZfMaterializeJob::MaterializePartition(
     return ROCKSDB_NAMESPACE::Status::OK();
   }
 
+  // F-2：CSD A-only 直装卸载尝试（替代下方整表 build_one 的生产者）。
+  // 门控：csd_materialize 开 && 键已有序（aside_sorted，kernel 输出键序 = 输入
+  // 序——无序输入不可卸）&& 单代（多代混包 locator 代际失真，F-3 前不作）；
+  // do_slice 已在上方 return，此处恒为单文件分区整表路径。内部再经
+  // BuildCsdSlotAFromSorted 做字节级资格（user 恰 24B / value ≤ 1024B）。
+  // 成功 → 设备产物已 ZfSeal 封口直装（输出入 outputs_）→ 返回 OK；
+  // 失败 → 回落下方 build_one（行为与 csd off 完全一致，零回归）。
+  if (ctx_->zfo_.csd_materialize && aside_sorted && gens.size() == 1 &&
+      TryCsdDirectMaterialize(part_id, gens.front().second, keys, values)) {
+    return ROCKSDB_NAMESPACE::Status::OK();
+  }
+
   // 非切片：整表输出（原逻辑，iter 持有已排序向量）。
   std::unique_ptr<ROCKSDB_NAMESPACE::VectorIterator> iter(
       new ROCKSDB_NAMESPACE::VectorIterator(
@@ -1213,6 +1231,236 @@ ROCKSDB_NAMESPACE::Status ZfMaterializeJob::MaterializePartition(
   iter->SeekToFirst();
   assert(iter->Valid());
   return build_one(std::move(iter));
+}
+
+// F-2：CSD A-only 直装卸载（见 materialize_job.h）。与 host build_one 收尾逐
+// 字段同构产出 meta；文件 = 设备 [data+index] 前缀 + ZfSeal 封口（引擎自身
+// PropertyBlockBuilder/MetaIndexBuilder/FooterBuilder 序列化，逐字段镜像写档
+// 配置）→ 引擎任何 reader 可打开（CRC 逐块强校验，字节错即 Corruption）。
+bool ZfMaterializeJob::TryCsdDirectMaterialize(
+    uint32_t part_id, uint32_t gen, const std::vector<std::string>& keys,
+    const std::vector<std::string>& values) {
+  assert(ctx_->zfo_.csd_materialize);
+  assert(!keys.empty());
+
+  // ---- 资格打包（不过设备即可判否）：字节级资格 + kernel A 槽 ----
+  ZfCsdSlot slot;
+  uint64_t deletions = 0;
+  if (!BuildCsdSlotAFromSorted(part_id, gen, keys, values, &deletions, &slot)) {
+    ctx_->csd_fallbacks_.fetch_add(1, std::memory_order_relaxed);
+    return false;  // 非卸载语料档（user≠24B / value>1024B / 空/超限）
+  }
+  std::shared_ptr<ZfCsdSession> sess = CreateZfCsdSession(ctx_->zfo_);
+  if (!sess || !sess->Available()) {
+    ctx_->csd_fallbacks_.fetch_add(1, std::memory_order_relaxed);
+    return false;  // 无设备实现注册 / Probe 不可用
+  }
+  ctx_->csd_attempts_.fetch_add(1, std::memory_order_relaxed);
+
+  // ---- 设备 run（mode=1 全版本；A-only 单口，无 B）----
+  const uint64_t n = keys.size();
+  const uint64_t staged_size = slot.file_size;
+  ZfCsdSlot slots[4];  // slots[1..3] 空 = 无 B 侧
+  slots[0] = std::move(slot);
+  // 输出预算：保守上限（A-only 下 data ≈ 输入帧区量级）。超预算 → 设备 run
+  // 失败 → 回落 host；正确性不依赖预算精度。
+  const uint64_t sst_bytes = 2 * staged_size + 64 * 1024;
+  const uint64_t idx_bytes = sst_bytes / 4 + 1024 * 1024;
+  ZfCsdOutput out;
+  ROCKSDB_NAMESPACE::Status rs =
+      sess->RunAb(slots, n, sst_bytes, idx_bytes, &out);
+  // 单文件契约 + 精确条目复核：encoder 按 kv_sum 精确输出，pps[1] 必须 == n
+  // （少 = 静默截断、多 = 错排）；data/index 非空。任一不符即拒绝回落 host。
+  if (!rs.ok() || out.file_num != 1 || out.pps[1] != n || out.data.empty() ||
+      out.index.empty()) {
+    ROCKS_LOG_WARN(mc_.db_options->info_log,
+                   "[JOB %d] ZF csd A-only run failed (part=%u gen=%u n=%lu): %s"
+                   " files=%lu pps1=%lu data=%zu index=%zu",
+                   mc_.job_context->job_id, part_id, gen,
+                   (unsigned long)n, rs.ToString().c_str(),
+                   (unsigned long)out.file_num, (unsigned long)out.pps[1],
+                   out.data.size(), out.index.size());
+    ctx_->csd_fallbacks_.fetch_add(1, std::memory_order_relaxed);
+    return false;
+  }
+  ROCKSDB_NAMESPACE::ZfSealManifest m;
+  if (!ZfCsdManifestFromPps(out.pps, out.data.size(), out.index.size(), &m)) {
+    ctx_->csd_fallbacks_.fetch_add(1, std::memory_order_relaxed);
+    return false;
+  }
+  m.num_deletions = deletions;  // kernel PPS 不报删除数；引擎 props 统计位回填
+
+  // ---- 落盘：TableFileName + writer（镜像 finish_cur）+ [data][index]+ZfSeal ----
+  const ROCKSDB_NAMESPACE::ImmutableOptions& iopt = mc_.cfd->ioptions();
+  const ROCKSDB_NAMESPACE::MutableCFOptions& mcf = *mc_.mutable_cf_options;
+  ROCKSDB_NAMESPACE::ReadOptions read_options(
+      ROCKSDB_NAMESPACE::Env::IOActivity::kFlush);
+  read_options.rate_limiter_priority = mc_.io_priority;
+  const ROCKSDB_NAMESPACE::WriteOptions write_options(
+      mc_.io_priority, ROCKSDB_NAMESPACE::Env::IOActivity::kFlush);
+  int64_t _current_time = 0;
+  ROCKSDB_NAMESPACE::Status ts =
+      mc_.db_options->clock->GetCurrentTime(&_current_time);
+  if (!ts.ok()) {
+    _current_time = 0;
+  }
+  const uint64_t current_time = static_cast<uint64_t>(_current_time);
+  const uint64_t oldest_key_time = current_time;  // 与 build_one 同简化
+  const uint64_t file_number = mc_.versions->NewFileNumber();
+  const std::string fname = ROCKSDB_NAMESPACE::TableFileName(
+      iopt.cf_paths, file_number, 0);
+
+  // RAII：失败即删已建文件（成功 Disarm）。文件尚未建时 DeleteFile 幂等。
+  struct CsdFileGuard {
+    ROCKSDB_NAMESPACE::Env* env = nullptr;
+    std::string fname;
+    ~CsdFileGuard() {
+      if (!fname.empty() && env != nullptr) {
+        env->DeleteFile(fname).PermitUncheckedError();
+      }
+    }
+    void Disarm() { fname.clear(); }
+  } guard;
+  guard.env = mc_.db_options->env;
+  guard.fname = fname;
+
+  ROCKSDB_NAMESPACE::FileOptions fo_copy = *mc_.file_options;
+  fo_copy.write_hint = ROCKSDB_NAMESPACE::Env::WLTH_NOT_SET;
+  std::unique_ptr<ROCKSDB_NAMESPACE::FSWritableFile> file;
+  ROCKSDB_NAMESPACE::IOStatus io_s = ROCKSDB_NAMESPACE::NewWritableFile(
+      mc_.db_options->fs.get(), fname, &file, fo_copy);
+  if (!io_s.ok()) {
+    ROCKS_LOG_WARN(mc_.db_options->info_log,
+                   "[JOB %d] ZF csd NewWritableFile(%s): %s",
+                   mc_.job_context->job_id, fname.c_str(),
+                   io_s.ToString().c_str());
+    ctx_->csd_fallbacks_.fetch_add(1, std::memory_order_relaxed);
+    return false;
+  }
+  file->SetIOPriority(mc_.io_priority);
+  file->SetWriteLifeTimeHint(fo_copy.write_hint);
+  std::unique_ptr<ROCKSDB_NAMESPACE::WritableFileWriter> file_writer(
+      new ROCKSDB_NAMESPACE::WritableFileWriter(
+          std::move(file), fname, *mc_.file_options, mc_.db_options->clock,
+          mc_.io_tracer, mc_.stats, ROCKSDB_NAMESPACE::Histograms::SST_WRITE_MICROS,
+          iopt.listeners, iopt.file_checksum_gen_factory.get(),
+          iopt.checksum_handoff_file_types.Contains(
+              ROCKSDB_NAMESPACE::FileType::kTableFile),
+          false /* buffered_data_with_checksum */));
+  ROCKSDB_NAMESPACE::IOOptions io_opts;
+  io_s = ROCKSDB_NAMESPACE::WritableFileWriter::PrepareIOOptions(write_options,
+                                                                 io_opts);
+  ROCKSDB_NAMESPACE::Status ss = io_s;
+  // 校验档锁：物化仅在 F-1 §14.6 锁档 CF 下运行（zeroflush::Open 恒强制 BBT
+  // 锁档）；Name 漂移 = 配置漂移 → 回落（绝不用错档 props 封口）。
+  // 本 fork 的 table_factory 位于 MutableCFOptions/ColumnFamilyOptions（Immutable
+  // 选项不含）；物化路径经 mcf 构建 TableBuilderOptions，mcf 即生效表厂来源。
+  if (ss.ok() && (mcf.table_factory == nullptr ||
+                  mcf.table_factory->Name() !=
+                      ROCKSDB_NAMESPACE::BlockBasedTableFactory::kClassName())) {
+    ss = ROCKSDB_NAMESPACE::Status::InvalidArgument(
+        "ZF csd materialize: CF table_factory not the F-1 locked BBT");
+  }
+  if (ss.ok() && !out.data.empty()) {
+    io_s = file_writer->Append(
+        io_opts, ROCKSDB_NAMESPACE::Slice(
+                     reinterpret_cast<const char*>(out.data.data()),
+                     out.data.size()));
+    ss = io_s;
+  }
+  if (ss.ok() && !out.index.empty()) {
+    io_s = file_writer->Append(
+        io_opts, ROCKSDB_NAMESPACE::Slice(
+                     reinterpret_cast<const char*>(out.index.data()),
+                     out.index.size()));
+    ss = io_s;
+  }
+  if (ss.ok()) {
+    // props 唯一标识 / file_number 一致性：与 build_one 同构（cur_file_num ==
+    // 本文件号 → GetSstInternalUniqueId 校验通过）。
+    ROCKSDB_NAMESPACE::TableBuilderOptions tbopt(
+        iopt, mcf, read_options, write_options, mc_.cfd->internal_comparator(),
+        mc_.cfd->internal_tbl_prop_coll_factories(), mc_.output_compression,
+        mcf.compression_opts, mc_.cfd->GetID(), mc_.cfd->GetName(),
+        0 /* level */, current_time /* newest_key_time */,
+        false /* is_bottommost */, ROCKSDB_NAMESPACE::TableFileCreationReason::kFlush,
+        oldest_key_time, current_time, mc_.db_id, mc_.db_session_id,
+        0 /* target_file_size */, file_number,
+        ROCKSDB_NAMESPACE::kMaxSequenceNumber);
+    ROCKSDB_NAMESPACE::BlockBasedTableOptions locked_bbt;  // F-1 §14.6 锁档
+    locked_bbt.format_version = 2;
+    locked_bbt.checksum = ROCKSDB_NAMESPACE::kCRC32c;
+    locked_bbt.index_type =
+        ROCKSDB_NAMESPACE::BlockBasedTableOptions::kBinarySearch;
+    ROCKSDB_NAMESPACE::ZfSealOptions zfopt;
+    zfopt.tboptions = &tbopt;
+    zfopt.table_options = &locked_bbt;
+    ss = ROCKSDB_NAMESPACE::ZfSeal(zfopt, m, file_writer.get());
+  }
+  if (ss.ok()) {
+    ROCKSDB_NAMESPACE::IOOptions opts;
+    ROCKSDB_NAMESPACE::IOStatus io_s2 =
+        ROCKSDB_NAMESPACE::WritableFileWriter::PrepareIOOptions(write_options,
+                                                                opts);
+    if (io_s2.ok()) {
+      io_s2 = file_writer->Sync(opts, iopt.use_fsync);
+    }
+    if (io_s2.ok()) {
+      io_s2 = file_writer->Close(opts);
+    }
+    ss = io_s2;
+  }
+  if (!ss.ok()) {
+    ROCKS_LOG_WARN(mc_.db_options->info_log,
+                   "[JOB %d] ZF csd seal/write failed (%s): %s", mc_.job_context->job_id,
+                   fname.c_str(), ss.ToString().c_str());
+    ctx_->csd_fallbacks_.fetch_add(1, std::memory_order_relaxed);
+    return false;
+  }
+  uint64_t file_size = 0;
+  ts = mc_.db_options->env->GetFileSize(fname, &file_size);
+  if (!ts.ok() || file_size == 0) {
+    ctx_->csd_fallbacks_.fetch_add(1, std::memory_order_relaxed);
+    return false;
+  }
+
+  // ---- 填 meta（与 finish_cur 收尾对齐）并入 outputs_（host direct 约定）----
+  ROCKSDB_NAMESPACE::FileMetaData meta;
+  meta.fd = ROCKSDB_NAMESPACE::FileDescriptor(file_number, 0, file_size);
+  // A-only 直装 = 全版本保留、键序 = 输入序：smallest/largest = 首/尾 ik。
+  meta.smallest.DecodeFrom(ROCKSDB_NAMESPACE::Slice(keys.front()));
+  meta.largest.DecodeFrom(ROCKSDB_NAMESPACE::Slice(keys.back()));
+  // tail_size = index+props+footer 区（builder 语义：file_size - tail_start_offset，
+  // 而 tail_start_offset == data_size == index 块起始）。
+  meta.tail_size = file_size - m.data_size;
+  meta.marked_for_compaction = false;
+  meta.user_defined_timestamps_persisted = iopt.persist_user_defined_timestamps;
+  meta.file_checksum = file_writer->GetFileChecksum();
+  meta.file_checksum_func_name = file_writer->GetFileChecksumFuncName();
+  if (!mc_.db_id.empty() && !mc_.db_session_id.empty()) {
+    if (!ROCKSDB_NAMESPACE::GetSstInternalUniqueId(
+             mc_.db_id, mc_.db_session_id, file_number, &meta.unique_id)
+             .ok()) {
+      meta.unique_id = ROCKSDB_NAMESPACE::kNullUniqueId64x2;
+    }
+  }
+  meta.epoch_number = mc_.cfd->NewEpochNumber();
+  {
+    rocksdb::MutexLock l(&out_mu_);
+    MaterializeOutput mo;
+    mo.meta = std::move(meta);  // 与 host build_one 同：part_id 缺省（定层走范围）
+    outputs_.push_back(std::move(mo));
+  }
+  guard.Disarm();
+  ctx_->csd_files_.fetch_add(1, std::memory_order_relaxed);
+  ROCKS_LOG_INFO(mc_.db_options->info_log,
+                 "[JOB %d] ZF csd materialized part=%u gen=%u → %s (%lu B, "
+                 "%lu entries, %lu dels, data=%lu index=%lu)",
+                 mc_.job_context->job_id, part_id, gen, fname.c_str(),
+                 (unsigned long)file_size, (unsigned long)n,
+                 (unsigned long)deletions, (unsigned long)m.data_size,
+                 (unsigned long)m.index_size);
+  return true;
 }
 
 ROCKSDB_NAMESPACE::Status ZfMaterializeJob::MaterializeMergePartition(

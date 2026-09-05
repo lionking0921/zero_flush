@@ -143,6 +143,207 @@ static void DumpCase(const zf::Workload& wl, const std::vector<uint8_t>& data_b,
   printf("  dumped %s\n", name);
 }
 
+// ---- (E-2) A+B 真卡重放：加载 CPU-sim AB 落盘的逐槽输入，跑真实内核 mode=1 ----
+#include <dirent.h>
+#include <algorithm>
+
+static const std::vector<uint8_t>& empty_bytes();
+
+struct AbSlot {
+  uint32_t kind = 0;   // 0 = A staged (decoder), 1 = B raw-SST 链 (decoder_sst)
+  uint64_t kv = 0;     // A: slim 条数；B: 0
+  uint64_t file_size = 0;  // A: WAL 区字节；B: 链字节总数（与 CPU-sim Slot 同语义）
+  std::vector<uint8_t> bytes;
+};
+
+struct AbCase {
+  std::string label;
+  std::vector<AbSlot> slots;
+  uint64_t expect_n = 0;     // .expect 行数（host_data[9] kv_sum）
+  uint64_t ndel = 0;         // .expect 删除行数（prefix 头）
+};
+
+static const char* g_ab_dir = nullptr;
+
+static std::vector<std::string> ListAbLabels(const char* dir) {
+  std::vector<std::string> out;
+  DIR* d = opendir(dir);
+  if (!d) { fprintf(stderr, "cannot open ab dump dir %s\n", dir); exit(2); }
+  struct dirent* e;
+  while ((e = readdir(d)) != nullptr) {
+    std::string n = e->d_name;
+    if (n.size() > 5 && n.compare(n.size() - 5, 5, ".desc") == 0)
+      out.push_back(n.substr(0, n.size() - 5));
+  }
+  closedir(d);
+  std::sort(out.begin(), out.end());
+  return out;
+}
+
+static std::vector<uint8_t> ReadAll(const std::string& p) {
+  FILE* f = fopen(p.c_str(), "rb");
+  if (!f) { fprintf(stderr, "cannot read %s\n", p.c_str()); exit(2); }
+  fseek(f, 0, SEEK_END);
+  long n = ftell(f);
+  fseek(f, 0, SEEK_SET);
+  std::vector<uint8_t> b(n);
+  if (n && fread(b.data(), 1, n, f) != (size_t)n) { fprintf(stderr, "short read %s\n", p.c_str()); exit(2); }
+  fclose(f);
+  return b;
+}
+
+// 统计 .expect 行数 / 删除数（每行 hex(ik)\thex(value)；value 空 = 删除）
+static void CountExpect(const std::string& dir, const std::string& label,
+                        uint64_t* n, uint64_t* ndel) {
+  std::string p = dir + "/" + label + ".expect";
+  FILE* f = fopen(p.c_str(), "r");
+  if (!f) { fprintf(stderr, "cannot open %s\n", p.c_str()); exit(2); }
+  uint64_t nn = 0, dd = 0;
+  char line[4096];
+  while (fgets(line, sizeof(line), f)) {
+    if (!line[0] || line[0] == '\n') continue;
+    ++nn;
+    char* tab = strchr(line, '\t');
+    if (tab && (!tab[1] || tab[1] == '\n')) ++dd;
+  }
+  fclose(f);
+  *n = nn;
+  *ndel = dd;
+}
+
+static AbCase LoadAbCase(const std::string& dir, const std::string& label) {
+  AbCase c;
+  c.label = label;
+  std::string d = dir + "/" + label + ".desc";
+  FILE* f = fopen(d.c_str(), "rb");
+  if (!f) { fprintf(stderr, "cannot open %s\n", d.c_str()); exit(2); }
+  uint32_t n = 0;
+  if (fread(&n, 4, 1, f) != 1 || n > 4) { fprintf(stderr, "bad desc %s\n", d.c_str()); exit(2); }
+  c.slots.resize(n);
+  for (uint32_t i = 0; i < n; ++i) {
+    AbSlot& s = c.slots[i];
+    uint64_t len = 0;
+    if (fread(&s.kind, 4, 1, f) != 1 || fread(&s.kv, 8, 1, f) != 1 ||
+        fread(&s.file_size, 8, 1, f) != 1 || fread(&len, 8, 1, f) != 1) {
+      fprintf(stderr, "bad desc %s slot %u\n", d.c_str(), i);
+      exit(2);
+    }
+    std::string sf = dir + "/" + label + ".s" + std::to_string(i);
+    s.bytes = ReadAll(sf);
+    if (s.bytes.size() != len) {
+      fprintf(stderr, "desc len %llu != file %zu for %s.s%u\n",
+              (unsigned long long)len, s.bytes.size(), label.c_str(), i);
+      exit(2);
+    }
+  }
+  fclose(f);
+  CountExpect(dir, label, &c.expect_n, &c.ndel);
+  return c;
+}
+
+// 跑一个 AB case（真实内核 mode=1），输出设备前缀并写盘，与 CPU-sim .prefix 逐字节对拍。
+// CPU-sim 前缀布局（zf_seal_check 同）：8B magic + u64×3 + PPS_KERNEL_SIZE×u64 + data + index。
+static bool RunAbDevice(OcCtx& c, const AbCase& cs, const std::string& dump_dir) {
+  uint32_t nslots = uint32_t(cs.slots.size());
+  std::vector<cl::Buffer> inbuf;
+  uint64_t wal_bytes[4] = {0, 0, 0, 0};
+  uint64_t kv[4] = {0, 0, 0, 0};
+  uint32_t kind[4] = {0, 0, 0, 0};
+  for (uint32_t p = 0; p < 4; ++p) {
+    if (p < nslots) {
+      wal_bytes[p] = cs.slots[p].file_size;
+      kv[p] = cs.slots[p].kv;
+      kind[p] = cs.slots[p].kind;
+    }
+    const std::vector<uint8_t>& src = (p < nslots) ? cs.slots[p].bytes : empty_bytes();
+    size_t cap = std::max<size_t>(ALIGN_TO_4K(src.size()), 4096);
+    cl::Buffer b = MakeBuf(c, cap);
+    MapBlob(c, b, cap, src.data(), src.size());
+    inbuf.push_back(b);
+  }
+
+  const uint64_t kSstBytes = 16ull * 1024 * 1024;
+  const uint64_t kIdxBytes = 2ull * 1024 * 1024;
+  cl::Buffer sst_dev = MakeBuf(c, kSstBytes);
+  cl::Buffer idx_dev = MakeBuf(c, kIdxBytes);
+  cl::Buffer pps_dev = MakeBuf(c, sizeof(uint64_t) * 2048);
+
+  uint64_t host_data[24] = {0};
+  host_data[4] = kSstBytes;
+  for (uint32_t p = 0; p < 4; ++p) {
+    host_data[5 + p] = wal_bytes[p];
+    host_data[10 + p] = kv[p];
+  }
+  host_data[9] = cs.expect_n;              // 输出记录总数（oracle 大小）
+  host_data[15] = 1;                       // mode=1 A+B 全版本
+  for (uint32_t p = 0; p < 4; ++p) host_data[16 + p] = kind[p];
+  cl::Buffer host_dev = MakeBuf(c, sizeof(host_data));
+  MapBlob(c, host_dev, sizeof(host_data), (const uint8_t*)host_data, sizeof(host_data));
+
+  for (uint32_t p = 0; p < 4; ++p) c.krn.setArg(int(p), inbuf[p]);
+  c.krn.setArg(4, host_dev);
+  c.krn.setArg(5, sst_dev);
+  c.krn.setArg(6, idx_dev);
+  c.krn.setArg(7, pps_dev);
+  c.q.enqueueTask(c.krn, nullptr, nullptr);
+  c.q.finish();
+
+  std::vector<uint64_t> out(2048);
+  MapRead(c, pps_dev, sizeof(uint64_t) * out.size(), out.data());
+  uint64_t top_sst = out[PPS_KERNEL_SIZE];
+  uint64_t top_idx = out[PPS_KERNEL_SIZE + MAX_OUTPUT_FILE_NUM];
+  uint64_t file_num = out[PPS_KERNEL_SIZE + 2 * MAX_OUTPUT_FILE_NUM];
+  printf("ab case %s  slots=%u expect=%llu file_num=%llu data=%llu idx=%llu\n",
+         cs.label.c_str(), nslots, (unsigned long long)cs.expect_n,
+         (unsigned long long)file_num, (unsigned long long)top_sst, (unsigned long long)top_idx);
+  if (file_num != 1) { printf("  FAIL file_num=%llu (expected 1)\n", (unsigned long long)file_num); return false; }
+
+  std::vector<uint8_t> data_b(top_sst), idx_b(top_idx);
+  if (top_sst) MapRead(c, sst_dev, size_t(top_sst), data_b.data());
+  if (top_idx) MapRead(c, idx_dev, size_t(top_idx), idx_b.data());
+
+  // 读 CPU-sim 期望前缀 → 逐字节比 data+index 区
+  std::string simpfx = dump_dir + "/" + cs.label + ".prefix";
+  std::vector<uint8_t> sim = ReadAll(simpfx);
+  const uint64_t kHdr = 8 + 24 + sizeof(uint64_t) * PPS_KERNEL_SIZE;
+  if (sim.size() < kHdr) { printf("  FAIL bad sim prefix %s (%zu)\n", simpfx.c_str(), sim.size()); return false; }
+  uint64_t sdata = 0, sidx = 0;
+  memcpy(&sdata, sim.data() + 8, 8);
+  memcpy(&sidx, sim.data() + 16, 8);
+  bool same = (sdata == top_sst && sidx == top_idx &&
+               memcmp(data_b.data(), sim.data() + kHdr, data_b.size()) == 0 &&
+               memcmp(idx_b.data(), sim.data() + kHdr + data_b.size(), idx_b.size()) == 0);
+  if (!same) {
+    printf("  FAIL byte-mismatch vs CPU-sim prefix (sim data=%llu idx=%llu)\n",
+           (unsigned long long)sdata, (unsigned long long)sidx);
+    return false;
+  }
+
+  // 落设备前缀（zf_seal_check / 引擎直读可消费；同一几何）
+  if (!dump_dir.empty()) {
+    std::string dpfx = dump_dir + "/" + cs.label + ".device.prefix";
+    FILE* f = fopen(dpfx.c_str(), "wb");
+    if (f) {
+      fwrite("ZFPRFX1\n", 1, 8, f);
+      uint64_t hdr[3] = {top_sst, top_idx, cs.ndel};
+      fwrite(hdr, 8, 3, f);
+      fwrite(out.data(), sizeof(uint64_t), PPS_KERNEL_SIZE, f);
+      fwrite(data_b.data(), 1, data_b.size(), f);
+      fwrite(idx_b.data(), 1, idx_b.size(), f);
+      fclose(f);
+      printf("  wrote %s (== CPU-sim prefix bytes)\n", dpfx.c_str());
+    }
+  }
+  printf("  OK  device data+index == CPU-sim prefix, %llu records\n",
+         (unsigned long long)cs.expect_n);
+  return true;
+}
+
+static const std::vector<uint8_t>& empty_bytes() {
+  static const std::vector<uint8_t> e;
+  return e;
+}
+
 // ---- 跑一个 workload；返回是否全绿 ----
 static bool RunCase(OcCtx& c, uint64_t seed, uint32_t port_count,
                     size_t base_keys, size_t dup_keys) {
@@ -228,10 +429,24 @@ int main(int argc, char** argv) {
     if (!std::strcmp(argv[i], "-x") && i + 1 < argc) xclbin = argv[++i];
     else if (!std::strcmp(argv[i], "-d") && i + 1 < argc) dev = atoi(argv[++i]);
     else if (!std::strcmp(argv[i], "-o") && i + 1 < argc) g_dump_dir = argv[++i];
+    else if (!std::strcmp(argv[i], "--ab") && i + 1 < argc) g_ab_dir = argv[++i];
     else rest.push_back(argv[i]);
   }
-  if (xclbin.empty()) { std::cerr << "usage: main_zf -x <xclbin> [-d <dev>] [seed ports base dup]...\n"; return 2; }
+  if (xclbin.empty()) { std::cerr << "usage: main_zf -x <xclbin> [-d <dev>] [--ab <ab_dump_dir>] [-o <dump>] [seed ports base dup]...\n"; return 2; }
   OcCtx c = OcCtx::Make(xclbin, dev);
+
+  if (g_ab_dir) {
+    auto labels = ListAbLabels(g_ab_dir);
+    if (labels.empty()) { fprintf(stderr, "--ab: no *.desc cases in %s\n", g_ab_dir); return 2; }
+    int npass = 0;
+    for (const auto& lb : labels) {
+      AbCase cs = LoadAbCase(g_ab_dir, lb);
+      if (RunAbDevice(c, cs, g_ab_dir)) ++npass;
+    }
+    printf("==== AB on-device: %d/%zu cases == CPU-sim prefix ====\n", npass, labels.size());
+    fflush(stdout);
+    return npass == (int)labels.size() ? 0 : 1;
+  }
 
   struct C { uint64_t seed; uint32_t ports; size_t base, dup; };
   std::vector<C> cases;

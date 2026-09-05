@@ -98,6 +98,18 @@ struct ZeroFlushOptions {
   // std::sort）。默认开；false = 恒回落原路径（性能 A/B / 规避用）。
   bool materialize_sort_assist = true;
 
+  // ---- F-2：CSD-FPGA 物化卸载（默认关 = 恒走 host BuildTable，零行为回归）----
+  // true 时，ZfMaterializeJob 物化输出口把 A（冻结索引+封存 WAL）∪ B（overlap
+  // 分区文件）经 A+B kernel（mode=1 全版本）物化为分区 SST，ZfSeal 封口直装；
+  // 任一资格/设备/运行失败自动回落 host（绝不静默错排）。默认 false：
+  // 新增路径全部不可达，csd_* 计数恒为 0。
+  bool csd_materialize = false;
+  // 设备选择：xclbin 路径（空 = 用注册会话工厂的默认）与设备序号（默认 0 =
+  // 6d:00.1）。仅当有 XRT/OpenCL 设备实现注册（csd_session_opencl.cc 链接进
+  // 带设备的测试/驱动目标）时生效；引擎 lib 恒不依赖 XRT。
+  std::string csd_xclbin;
+  uint32_t csd_device = 0;
+
   // ---- M4.3 终态 ----
   // M4.3d-2：分区索引总内存预算（背压触发 freeze；默认 4GB ≈ 6~8 千万
   // key 窗口，与 M4.1 的 write_buffer 语义对齐）。M4.4b：旧路径
@@ -331,6 +343,14 @@ class ZeroFlushContext {
   // M4.5b 指标：kSkip 攒批跳过的分区次数（决策时累计）。
   uint64_t skip_count() const;
 
+  // ---- F-2：CSD 卸载统计（默认关下恒为 0）----
+  // csd_files = 卸载路径产出并直装成功的分区 SST 文件数；csd_attempts = 通过
+  // 资格、真正尝试了一次设备 run 的物化次数；csd_fallbacks = 期望卸载但因
+  // 资格不符/设备不可用/run 失败而回落 host 的次数（含未启用卸载时不计）。
+  uint64_t csd_files() const;
+  uint64_t csd_attempts() const;
+  uint64_t csd_fallbacks() const;
+
   ZeroFlushOptions zfo_;
   std::string wal_dir_;       // wal_dir/zfwal
   ROCKSDB_NAMESPACE::Env* env_;
@@ -359,6 +379,10 @@ class ZeroFlushContext {
   std::atomic<uint64_t> base_merge_rewritten_bytes_{0};  // 被重写 base 字节
   // ---- M4.5b 攒批统计 ----
   std::atomic<uint64_t> skip_count_{0};  // kSkip 攒批跳过的分区次数
+  // ---- F-2：CSD 卸载统计 ----
+  std::atomic<uint64_t> csd_files_{0};      // 卸载产出并直装的分区 SST 文件数
+  std::atomic<uint64_t> csd_attempts_{0};   // 通过资格并尝试设备 run 的物化次数
+  std::atomic<uint64_t> csd_fallbacks_{0};  // 期望卸载却回落 host 的次数
 };
 
 // 打开 ZeroFlush DB：

@@ -18,6 +18,7 @@
 #include "rocksdb/cache.h"
 #include "rocksdb/db.h"
 #include "rocksdb/env.h"
+#include "rocksdb/table.h"
 #include "rocksdb/write_batch.h"
 #include "util/hash.h"
 #include "zeroflush/partition_index.h"
@@ -416,6 +417,12 @@ bool ZeroFlushContext::GetProperty(const std::string& prop,
     *value = std::to_string(base_merge_rewritten_bytes());
   } else if (prop == "rocksdb.zeroflush.skip_count") {
     *value = std::to_string(skip_count());
+  } else if (prop == "rocksdb.zeroflush.csd_files") {
+    *value = std::to_string(csd_files());
+  } else if (prop == "rocksdb.zeroflush.csd_attempts") {
+    *value = std::to_string(csd_attempts());
+  } else if (prop == "rocksdb.zeroflush.csd_fallbacks") {
+    *value = std::to_string(csd_fallbacks());
   } else {
     return false;
   }
@@ -513,6 +520,18 @@ uint64_t ZeroFlushContext::base_merge_rewritten_bytes() const {
 
 uint64_t ZeroFlushContext::skip_count() const {
   return skip_count_.load(std::memory_order_relaxed);
+}
+
+uint64_t ZeroFlushContext::csd_files() const {
+  return csd_files_.load(std::memory_order_relaxed);
+}
+
+uint64_t ZeroFlushContext::csd_attempts() const {
+  return csd_attempts_.load(std::memory_order_relaxed);
+}
+
+uint64_t ZeroFlushContext::csd_fallbacks() const {
+  return csd_fallbacks_.load(std::memory_order_relaxed);
 }
 
 uint32_t ZeroFlushContext::pending_epochs(
@@ -1248,6 +1267,25 @@ ROCKSDB_NAMESPACE::Status Open(const ROCKSDB_NAMESPACE::Options& opt,
   // 1) 替换 memtable factory（Slim，索引-only）
   ROCKSDB_NAMESPACE::Options zf_opt = opt;
   zf_opt.memtable_factory = std::make_shared<SlimMemTableRepFactory>();
+  // (F-1) §14.6 写档锁：zeroflush 产出的每个 SST（物化分区文件 / L0→base 归并输出）
+  // 都必须能被 CSD-FPGA kernel 的 decoder_sst 直接解码，且与 FPGA 产物逐字节同构 ——
+  // v2 / kCRC32c / kBinarySearch / 无压缩（data 块 trailer 类型字节 0x00）/ restart 默认。
+  // 覆盖本 CF 下全部 BuildTable / 原生 compaction 写路径（FlushJob 与 ZfMaterializeJob
+  // 的 output_compression / table_factory 均溯源到 CF options，此处即单点）。
+  // 说明：零档位文件仍可被引擎任何 TableReader 读回（版本自适应），只是写侧统一为 §14.6。
+  {
+    ROCKSDB_NAMESPACE::BlockBasedTableOptions zf_bbt;
+    zf_bbt.format_version = 2;
+    zf_bbt.checksum = ROCKSDB_NAMESPACE::kCRC32c;
+    zf_bbt.index_type = ROCKSDB_NAMESPACE::BlockBasedTableOptions::kBinarySearch;
+    // 其余默认：block_restart_interval=16、index_block_restart_interval=1、
+    // 无 filter / prefix / partition index —— 与 encoder/decoder_sst 口径一致。
+    zf_opt.table_factory.reset(
+        ROCKSDB_NAMESPACE::NewBlockBasedTableFactory(zf_bbt));
+    zf_opt.compression = ROCKSDB_NAMESPACE::kNoCompression;
+    zf_opt.bottommost_compression = ROCKSDB_NAMESPACE::kNoCompression;
+    zf_opt.compression_per_level.clear();
+  }
   // flush 由封存替代：抑制自动 flush（侵入点②在 DBImpl 层兜底，
   // 这里把 memtable 预算放大避免 write_buffer 触发原生 flush）
   zf_opt.write_buffer_size = std::max(zf_opt.write_buffer_size, (size_t)256 << 20);

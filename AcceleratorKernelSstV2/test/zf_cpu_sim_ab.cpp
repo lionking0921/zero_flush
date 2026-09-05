@@ -496,6 +496,36 @@ static void DumpCase(const std::string& name, const PipeOut& o,
   WriteZfPrefix(pfx, o.data_b, o.idx_b, o.out.data(), o.top_sst, o.top_idx, oracle);
 }
 
+// (E-2) 落盘该 case 的精确输入槽位，供真卡 host（main_zf --ab）逐字节重放：
+//   <label>.desc = [u32 slot_n][ 每槽 u32 kind + u64 kv + u64 file_size + u64 byte_len ]
+//   <label>.s<i>  = 第 i 槽原始字节（A: staged bytes；B: 整条 chain bytes）
+static void DumpInputs(const std::string& label, const std::vector<Slot>& slots) {
+  if (!g_dump_dir) return;
+  char p[1024];
+  snprintf(p, sizeof(p), "%s/%s.desc", g_dump_dir, label.c_str());
+  FILE* f = fopen(p, "wb");
+  if (!f) { printf("  dump open fail %s\n", p); return; }
+  uint32_t n = uint32_t(slots.size());
+  fwrite(&n, 4, 1, f);
+  for (const auto& s : slots) {
+    uint32_t kind = s.kind;
+    uint64_t kv = s.kv, fs = s.file_size, len = s.bytes.size();
+    fwrite(&kind, 4, 1, f);
+    fwrite(&kv, 8, 1, f);
+    fwrite(&fs, 8, 1, f);
+    fwrite(&len, 8, 1, f);
+  }
+  fclose(f);
+  for (size_t i = 0; i < slots.size(); ++i) {
+    snprintf(p, sizeof(p), "%s/%s.s%zu", g_dump_dir, label.c_str(), i);
+    FILE* bf = fopen(p, "wb");
+    if (!bf) { printf("  dump open fail %s\n", p); return; }
+    fwrite(slots[i].bytes.data(), 1, slots[i].bytes.size(), bf);
+    fclose(bf);
+  }
+  printf("  dumped %zu slot inputs (%s.*)\n", slots.size(), label.c_str());
+}
+
 static bool RunCaseOnce(const Scenario& sc, const char* dump_label) {
   // ---- B 文件字节（各文件 = encoder 预产的完整 raw-SST）----
   std::vector<RawSst> braw;
@@ -526,6 +556,7 @@ static bool RunCaseOnce(const Scenario& sc, const char* dump_label) {
     slots.push_back(s);
   }
   if (slots.empty()) { fprintf(stderr, "%s: empty case\n", sc.name.c_str()); return false; }
+  if (dump_label) DumpInputs(dump_label, slots);   // (E-2) 供真卡 host 重放同一输入
 
   uint64_t kv_sum = sc.oracle.size();
   PipeOut o = RunAB(slots, /*keep_all=*/1, kv_sum);
