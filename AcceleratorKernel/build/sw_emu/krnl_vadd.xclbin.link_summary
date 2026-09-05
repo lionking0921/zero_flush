@@ -1,0 +1,578 @@
+<ENTRY>
+{
+ "thisFile": "/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/build/sw_emu/krnl_vadd.xclbin.link_summary",
+ "connectId": "",
+ "serverToken": "",
+ "timestamp": "0"
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_CmdStep",
+ "dateTimestamp": "Sat Sep  5 17:29:49 2026",
+ "timestampMillis": "1788600589590",
+ "buildStep": {
+  "cmdId": "9e3b9d4e-d7da-4d1d-b5ce-af360e000374",
+  "name": "v++",
+  "logFile": "/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/_x/link/link.steps.log",
+  "commandLine": "/tools/Xilinx/Vitis/2022.2/bin/unwrapped/lnx64.o/v++  --vivado.prop \"run.__KERNEL__.{STEPS.SYNTH_DESIGN.ARGS.MORE OPTIONS}={-directive sdx_optimization_effort_high}\" --advanced.misc \"report=type report_timing_summary name impl_report_timing_summary_route_design_summary steps {route_design} runs {impl_1} options {-max_paths 10}\" --advanced.misc \"report=type report_timing_summary name impl_report_timing_summary_post_route_phys_opt_design_summary steps {post_route_phys_opt_design} runs {impl_1} options {-max_paths 10}\" -t sw_emu --platform /opt/xilinx/platforms/xilinx_u2_gen3x4_xdma_gc_2_202110_1/xilinx_u2_gen3x4_xdma_gc_2_202110_1.xpfm --define KERNEL_NAME=krnl_vadd --hls.clock 200000000:krnl_vadd -l build/sw_emu/krnl_vadd.xo -o build/sw_emu/krnl_vadd.xclbin ",
+  "args": [
+   "-t",
+   "sw_emu",
+   "--platform",
+   "/opt/xilinx/platforms/xilinx_u2_gen3x4_xdma_gc_2_202110_1/xilinx_u2_gen3x4_xdma_gc_2_202110_1.xpfm",
+   "--define",
+   "KERNEL_NAME=krnl_vadd",
+   "--hls.clock",
+   "200000000:krnl_vadd",
+   "-l",
+   "build/sw_emu/krnl_vadd.xo",
+   "-o",
+   "build/sw_emu/krnl_vadd.xclbin"
+  ],
+  "iniFiles": [],
+  "cwd": "/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel"
+ }
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_Status",
+ "dateTimestamp": "Sat Sep  5 17:29:49 2026",
+ "timestampMillis": "1788600589590",
+ "status": {
+  "cmdId": "9e3b9d4e-d7da-4d1d-b5ce-af360e000374",
+  "state": "CS_RUNNING"
+ }
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_FlowMetaData",
+ "dateTimestamp": "Sat Sep  5 17:29:52 2026",
+ "timestampMillis": "1788600592546",
+ "buildSummary": {
+  "hardwarePlatform": "xilinx_u2_gen3x4_xdma_gc_2_202110_1.xpfm",
+  "hardwareDsa": "hw.xsa",
+  "platformDirectory": "/opt/xilinx/platforms/xilinx_u2_gen3x4_xdma_gc_2_202110_1",
+  "runtime": "OpenCL",
+  "systemConfig": "Linux",
+  "flow": "BF_LINK",
+  "target": "TT_SW_EMU",
+  "binaryContainer": {
+   "base": {
+    "type": "BT_UKNOWN",
+    "name": "krnl_vadd",
+    "file": "/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/build/sw_emu/krnl_vadd.xclbin",
+    "reports": [],
+    "uuid": ""
+   },
+   "kernels": []
+  },
+  "kernels": [
+   {
+    "base": {
+     "type": "KERNEL",
+     "name": "krnl_vadd",
+     "file": "/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/build/sw_emu/krnl_vadd.xo",
+     "reports": [],
+     "uuid": ""
+    },
+    "sources": [
+     "/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/_x/link/int/xo/krnl_vadd/krnl_vadd/cpu_sources/krnl_vadd.cpp"
+    ],
+    "psSources": [],
+    "cuNames": [
+     "krnl_vadd_1"
+    ],
+    "type": "HLS",
+    "frequency": 0,
+    "freqUnits": ""
+   }
+  ],
+  "toolVersion": "Vitis V++ Compiler Release 2022.2. SW Build 3671529 on 2022-10-13-17:52:11"
+ }
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_Report",
+ "dateTimestamp": "Sat Sep  5 17:29:52 2026",
+ "timestampMillis": "1788600592686",
+ "report": {
+  "path": "/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/_x/link/int/systemDiagramModel.json",
+  "name": "",
+  "fileType": "JSON",
+  "reportType": "SYSTEM_DIAGRAM",
+  "cmdId": ""
+ }
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_SubCmdStep",
+ "dateTimestamp": "Sat Sep  5 17:29:52 2026",
+ "timestampMillis": "1788600592687",
+ "buildStep": {
+  "cmdId": "307beb1a-768c-48a5-a013-138be07e8f61",
+  "name": "regiongen",
+  "logFile": "/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/_x/link/int/krnl_vadd_regiongen.log",
+  "commandLine": "/tools/Xilinx/Vitis/2022.2/bin/../runtime/bin/regiongen_new -v -m /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/_x/link/int/krnl_vadd.xml -r /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/_x/link/int/krnl_vadd.rtd -t alg -o xcl_top",
+  "args": [
+   "-v",
+   "-m",
+   "/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/_x/link/int/krnl_vadd.xml",
+   "-r",
+   "/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/_x/link/int/krnl_vadd.rtd",
+   "-t",
+   "alg",
+   "-o",
+   "xcl_top"
+  ],
+  "iniFiles": [],
+  "cwd": "/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel"
+ }
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_Status",
+ "dateTimestamp": "Sat Sep  5 17:29:52 2026",
+ "timestampMillis": "1788600592688",
+ "status": {
+  "cmdId": "307beb1a-768c-48a5-a013-138be07e8f61",
+  "state": "CS_RUNNING"
+ }
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_Status",
+ "dateTimestamp": "Sat Sep  5 17:29:53 2026",
+ "timestampMillis": "1788600593747",
+ "status": {
+  "cmdId": "307beb1a-768c-48a5-a013-138be07e8f61",
+  "state": "CS_PASSED"
+ }
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_SubCmdStep",
+ "dateTimestamp": "Sat Sep  5 17:29:53 2026",
+ "timestampMillis": "1788600593750",
+ "buildStep": {
+  "cmdId": "dd142060-bc32-4ea3-885a-a3cb2ccc76a1",
+  "name": "gcc",
+  "logFile": "/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/_x/link/int/krnl_vadd/krnl_vadd_kernel_gcc.log",
+  "commandLine": "/tools/Xilinx/Vivado/2022.2/tps/lnx64/gcc-8.3.0/bin/gcc -I . -I /tools/Xilinx/Vitis_HLS/2022.2/bin/../include -I /tools/Xilinx/Vitis_HLS/2022.2/bin/../lnx64/tools/auto_cc/include -I /tools/Xilinx/Vitis_HLS/2022.2/bin/../common/technology/autopilot/opencl -I /tools/Xilinx/Vitis/2022.2/bin/../common/technology/autopilot/opencl -I /tools/Xilinx/Vitis/2022.2/bin/../data/emulation/include -I /usr/include/x86_64-linux-gnu -std=c++14 -D KERNEL_NAME=krnl_vadd -I /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/kernel -fPIC -g -c -DHLS_STREAM_THREAD_SAFE -MD -MT obj/krnl_vadd.o -MP -MF obj/krnl_vadd.Cd /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/_x/link/int/xo/krnl_vadd/krnl_vadd/cpu_sources/krnl_vadd.cpp -o obj/krnl_vadd.o",
+  "args": [
+   "-I",
+   ".",
+   "-I",
+   "/tools/Xilinx/Vitis_HLS/2022.2/bin/../include",
+   "-I",
+   "/tools/Xilinx/Vitis_HLS/2022.2/bin/../lnx64/tools/auto_cc/include",
+   "-I",
+   "/tools/Xilinx/Vitis_HLS/2022.2/bin/../common/technology/autopilot/opencl",
+   "-I",
+   "/tools/Xilinx/Vitis/2022.2/bin/../common/technology/autopilot/opencl",
+   "-I",
+   "/tools/Xilinx/Vitis/2022.2/bin/../data/emulation/include",
+   "-I",
+   "/usr/include/x86_64-linux-gnu",
+   "-std=c++14",
+   "-D",
+   "KERNEL_NAME=krnl_vadd",
+   "-I",
+   "/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/kernel",
+   "-fPIC",
+   "-g",
+   "-c",
+   "-DHLS_STREAM_THREAD_SAFE",
+   "-MD",
+   "-MT",
+   "obj/krnl_vadd.o",
+   "-MP",
+   "-MF",
+   "obj/krnl_vadd.Cd",
+   "/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/_x/link/int/xo/krnl_vadd/krnl_vadd/cpu_sources/krnl_vadd.cpp",
+   "-o",
+   "obj/krnl_vadd.o"
+  ],
+  "iniFiles": [],
+  "cwd": "/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel"
+ }
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_Status",
+ "dateTimestamp": "Sat Sep  5 17:29:53 2026",
+ "timestampMillis": "1788600593751",
+ "status": {
+  "cmdId": "dd142060-bc32-4ea3-885a-a3cb2ccc76a1",
+  "state": "CS_RUNNING"
+ }
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_Status",
+ "dateTimestamp": "Sat Sep  5 17:29:59 2026",
+ "timestampMillis": "1788600599137",
+ "status": {
+  "cmdId": "dd142060-bc32-4ea3-885a-a3cb2ccc76a1",
+  "state": "CS_PASSED"
+ }
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_SubCmdStep",
+ "dateTimestamp": "Sat Sep  5 17:29:59 2026",
+ "timestampMillis": "1788600599139",
+ "buildStep": {
+  "cmdId": "241704f6-6e94-43c4-be3f-11f503de935f",
+  "name": "ar",
+  "logFile": "/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/_x/link/int/krnl_vadd/krnl_vadd_ar.log",
+  "commandLine": "/tools/Xilinx/Vivado/2022.2/tps/lnx64/binutils-2.26/bin/ar -cr /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/_x/link/int/krnl_vadd/krnl_vadd.csim_cu.a /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/_x/link/int/krnl_vadd/obj/krnl_vadd.o",
+  "args": [
+   "-cr",
+   "/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/_x/link/int/krnl_vadd/krnl_vadd.csim_cu.a",
+   "/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/_x/link/int/krnl_vadd/obj/krnl_vadd.o"
+  ],
+  "iniFiles": [],
+  "cwd": "/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel"
+ }
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_Status",
+ "dateTimestamp": "Sat Sep  5 17:29:59 2026",
+ "timestampMillis": "1788600599139",
+ "status": {
+  "cmdId": "241704f6-6e94-43c4-be3f-11f503de935f",
+  "state": "CS_RUNNING"
+ }
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_Status",
+ "dateTimestamp": "Sat Sep  5 17:29:59 2026",
+ "timestampMillis": "1788600599199",
+ "status": {
+  "cmdId": "241704f6-6e94-43c4-be3f-11f503de935f",
+  "state": "CS_PASSED"
+ }
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_SubCmdStep",
+ "dateTimestamp": "Sat Sep  5 17:29:59 2026",
+ "timestampMillis": "1788600599202",
+ "buildStep": {
+  "cmdId": "c5de509c-ed78-46ef-adfc-867b7b5c93e4",
+  "name": "g++",
+  "logFile": "/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/_x/link/int/krnl_vadd_xcl_top_gpp.log",
+  "commandLine": "/tools/Xilinx/Vivado/2022.2/tps/lnx64/gcc-8.3.0/bin/g++ -I . -I /tools/Xilinx/Vitis_HLS/2022.2/bin/../include -I /tools/Xilinx/Vitis_HLS/2022.2/bin/../common/technology/autopilot/opencl -I /tools/Xilinx/Vitis/2022.2/bin/../common/technology/autopilot/opencl -I /tools/Xilinx/Vitis/2022.2/bin/../data/emulation/include -I /tools/Xilinx/Vitis_HLS/2022.2/bin/../lnx64/tools/auto_cc/include -fPIC -g -DHLS_STREAM_THREAD_SAFE -std=c++14 -fpermissive -c -MD -MT obj/xcl_top.o -MP -MF obj/xcl_top.CXXd xcl_top.cpp -o obj/xcl_top.o",
+  "args": [
+   "-I",
+   ".",
+   "-I",
+   "/tools/Xilinx/Vitis_HLS/2022.2/bin/../include",
+   "-I",
+   "/tools/Xilinx/Vitis_HLS/2022.2/bin/../common/technology/autopilot/opencl",
+   "-I",
+   "/tools/Xilinx/Vitis/2022.2/bin/../common/technology/autopilot/opencl",
+   "-I",
+   "/tools/Xilinx/Vitis/2022.2/bin/../data/emulation/include",
+   "-I",
+   "/tools/Xilinx/Vitis_HLS/2022.2/bin/../lnx64/tools/auto_cc/include",
+   "-fPIC",
+   "-g",
+   "-DHLS_STREAM_THREAD_SAFE",
+   "-std=c++14",
+   "-fpermissive",
+   "-c",
+   "-MD",
+   "-MT",
+   "obj/xcl_top.o",
+   "-MP",
+   "-MF",
+   "obj/xcl_top.CXXd",
+   "xcl_top.cpp",
+   "-o",
+   "obj/xcl_top.o"
+  ],
+  "iniFiles": [],
+  "cwd": "/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel"
+ }
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_Status",
+ "dateTimestamp": "Sat Sep  5 17:29:59 2026",
+ "timestampMillis": "1788600599202",
+ "status": {
+  "cmdId": "c5de509c-ed78-46ef-adfc-867b7b5c93e4",
+  "state": "CS_RUNNING"
+ }
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_Status",
+ "dateTimestamp": "Sat Sep  5 17:30:00 2026",
+ "timestampMillis": "1788600600295",
+ "status": {
+  "cmdId": "c5de509c-ed78-46ef-adfc-867b7b5c93e4",
+  "state": "CS_PASSED"
+ }
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_SubCmdStep",
+ "dateTimestamp": "Sat Sep  5 17:30:00 2026",
+ "timestampMillis": "1788600600296",
+ "buildStep": {
+  "cmdId": "daebf10e-6b0c-4466-96b7-f0a356f01818",
+  "name": "g++",
+  "logFile": "/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/_x/link/int/krnl_vadd_top_gpp.log",
+  "commandLine": "/tools/Xilinx/Vivado/2022.2/tps/lnx64/gcc-8.3.0/bin/g++ -fPIC -DHLS_STREAM_THREAD_SAFE -std=c++14 -Wall -shared -Wl,--whole-archive,-soname,krnl_vadd.so -o krnl_vadd.so krnl_vadd/krnl_vadd.csim_cu.a obj/xcl_top.o -Wl,--no-whole-archive -Wl,--as-needed -L /tools/Xilinx/Vitis_HLS/2022.2/bin/../lib/lnx64.o -lhlsmathsim -L /tools/Xilinx/Vitis_HLS/2022.2/bin/../lnx64/tools/fpo_v7_1 -lgmp -lmpfr -lIp_floating_point_v7_1_bitacc_cmodel -Wl,-rpath,/tools/Xilinx/Vitis_HLS/2022.2/bin/../lnx64/tools/fpo_v7_1 -L /tools/Xilinx/Vitis_HLS/2022.2/bin/../lnx64/tools/fft_v9_1 -lIp_xfft_v9_1_bitacc_cmodel -L /tools/Xilinx/Vitis_HLS/2022.2/bin/../lnx64/tools/fir_v7_0 -lgmp -lIp_fir_compiler_v7_2_bitacc_cmodel -L /tools/Xilinx/Vitis_HLS/2022.2/bin/../lnx64/lib/csim -lhlsmc++-GCC46 -L /tools/Xilinx/Vivado/2022.2/tps/lnx64/gcc-8.3.0/bin/../lib/gcc/x86_64-pc-linux-gnu/6.2.0/ -lgcov",
+  "args": [
+   "-fPIC",
+   "-DHLS_STREAM_THREAD_SAFE",
+   "-std=c++14",
+   "-Wall",
+   "-shared",
+   "-Wl,--whole-archive,-soname,krnl_vadd.so",
+   "-o",
+   "krnl_vadd.so",
+   "krnl_vadd/krnl_vadd.csim_cu.a",
+   "obj/xcl_top.o",
+   "-Wl,--no-whole-archive",
+   "-Wl,--as-needed",
+   "-L",
+   "/tools/Xilinx/Vitis_HLS/2022.2/bin/../lib/lnx64.o",
+   "-lhlsmathsim",
+   "-L",
+   "/tools/Xilinx/Vitis_HLS/2022.2/bin/../lnx64/tools/fpo_v7_1",
+   "-lgmp",
+   "-lmpfr",
+   "-lIp_floating_point_v7_1_bitacc_cmodel",
+   "-Wl,-rpath,/tools/Xilinx/Vitis_HLS/2022.2/bin/../lnx64/tools/fpo_v7_1",
+   "-L",
+   "/tools/Xilinx/Vitis_HLS/2022.2/bin/../lnx64/tools/fft_v9_1",
+   "-lIp_xfft_v9_1_bitacc_cmodel",
+   "-L",
+   "/tools/Xilinx/Vitis_HLS/2022.2/bin/../lnx64/tools/fir_v7_0",
+   "-lgmp",
+   "-lIp_fir_compiler_v7_2_bitacc_cmodel",
+   "-L",
+   "/tools/Xilinx/Vitis_HLS/2022.2/bin/../lnx64/lib/csim",
+   "-lhlsmc++-GCC46",
+   "-L",
+   "/tools/Xilinx/Vivado/2022.2/tps/lnx64/gcc-8.3.0/bin/../lib/gcc/x86_64-pc-linux-gnu/6.2.0/",
+   "-lgcov"
+  ],
+  "iniFiles": [],
+  "cwd": "/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel"
+ }
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_Status",
+ "dateTimestamp": "Sat Sep  5 17:30:00 2026",
+ "timestampMillis": "1788600600297",
+ "status": {
+  "cmdId": "daebf10e-6b0c-4466-96b7-f0a356f01818",
+  "state": "CS_RUNNING"
+ }
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_Status",
+ "dateTimestamp": "Sat Sep  5 17:30:00 2026",
+ "timestampMillis": "1788600600505",
+ "status": {
+  "cmdId": "daebf10e-6b0c-4466-96b7-f0a356f01818",
+  "state": "CS_PASSED"
+ }
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_Report",
+ "dateTimestamp": "Sat Sep  5 17:30:00 2026",
+ "timestampMillis": "1788600600648",
+ "report": {
+  "path": "/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/_x/link/int/krnl_vadd_xml.rtd",
+  "name": "",
+  "fileType": "JSON",
+  "reportType": "XCLBIN_INFO",
+  "cmdId": ""
+ }
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_SubCmdStep",
+ "dateTimestamp": "Sat Sep  5 17:30:00 2026",
+ "timestampMillis": "1788600600650",
+ "buildStep": {
+  "cmdId": "aea26c9d-46ee-4b5a-975e-de4aff5bbcf2",
+  "name": "xclbinutil",
+  "logFile": "/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/_x/link/int/krnl_vadd_xclbinutil.log",
+  "commandLine": "/tools/Xilinx/Vitis/2022.2/bin/xclbinutil --add-section BITSTREAM:RAW:/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/_x/link/int/krnl_vadd.so --force --target sw_emu --add-section :JSON:/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/_x/link/int/krnl_vadd.rtd --append-section :JSON:/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/_x/link/int/appendSection.rtd --add-section CLOCK_FREQ_TOPOLOGY:JSON:/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/_x/link/int/krnl_vadd_xml.rtd --add-section BUILD_METADATA:JSON:/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/_x/link/int/krnl_vadd_build.rtd --add-section EMBEDDED_METADATA:RAW:/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/_x/link/int/krnl_vadd.xml --add-section SYSTEM_METADATA:RAW:/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/_x/link/int/systemDiagramModel.json --output /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/build/sw_emu/krnl_vadd.xclbin",
+  "args": [
+   "--add-section",
+   "BITSTREAM:RAW:/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/_x/link/int/krnl_vadd.so",
+   "--force",
+   "--target",
+   "sw_emu",
+   "--add-section",
+   ":JSON:/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/_x/link/int/krnl_vadd.rtd",
+   "--append-section",
+   ":JSON:/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/_x/link/int/appendSection.rtd",
+   "--add-section",
+   "CLOCK_FREQ_TOPOLOGY:JSON:/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/_x/link/int/krnl_vadd_xml.rtd",
+   "--add-section",
+   "BUILD_METADATA:JSON:/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/_x/link/int/krnl_vadd_build.rtd",
+   "--add-section",
+   "EMBEDDED_METADATA:RAW:/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/_x/link/int/krnl_vadd.xml",
+   "--add-section",
+   "SYSTEM_METADATA:RAW:/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/_x/link/int/systemDiagramModel.json",
+   "--output",
+   "/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/build/sw_emu/krnl_vadd.xclbin"
+  ],
+  "iniFiles": [],
+  "cwd": "/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel"
+ }
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_Status",
+ "dateTimestamp": "Sat Sep  5 17:30:00 2026",
+ "timestampMillis": "1788600600650",
+ "status": {
+  "cmdId": "aea26c9d-46ee-4b5a-975e-de4aff5bbcf2",
+  "state": "CS_RUNNING"
+ }
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_Status",
+ "dateTimestamp": "Sat Sep  5 17:30:00 2026",
+ "timestampMillis": "1788600600854",
+ "status": {
+  "cmdId": "aea26c9d-46ee-4b5a-975e-de4aff5bbcf2",
+  "state": "CS_PASSED"
+ }
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_SubCmdStep",
+ "dateTimestamp": "Sat Sep  5 17:30:00 2026",
+ "timestampMillis": "1788600600855",
+ "buildStep": {
+  "cmdId": "7edd5bd6-84b1-4840-8f30-6afca4e64f2c",
+  "name": "xclbinutil",
+  "logFile": "/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/build/sw_emu/krnl_vadd.xclbin.info",
+  "commandLine": "/tools/Xilinx/Vitis/2022.2/bin/xclbinutil --quiet --info --input /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/build/sw_emu/krnl_vadd.xclbin",
+  "args": [
+   "--quiet",
+   "--info",
+   "--input",
+   "/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/build/sw_emu/krnl_vadd.xclbin"
+  ],
+  "iniFiles": [],
+  "cwd": "/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel"
+ }
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_Status",
+ "dateTimestamp": "Sat Sep  5 17:30:00 2026",
+ "timestampMillis": "1788600600855",
+ "status": {
+  "cmdId": "7edd5bd6-84b1-4840-8f30-6afca4e64f2c",
+  "state": "CS_RUNNING"
+ }
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_Status",
+ "dateTimestamp": "Sat Sep  5 17:30:01 2026",
+ "timestampMillis": "1788600601099",
+ "status": {
+  "cmdId": "7edd5bd6-84b1-4840-8f30-6afca4e64f2c",
+  "state": "CS_PASSED"
+ }
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_Report",
+ "dateTimestamp": "Sat Sep  5 17:30:01 2026",
+ "timestampMillis": "1788600601111",
+ "report": {
+  "path": "/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/_x/logs/optraceViewer.html",
+  "name": "",
+  "fileType": "HTML",
+  "reportType": "OPERATION_TRACE",
+  "cmdId": ""
+ }
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_Status",
+ "dateTimestamp": "Sat Sep  5 17:30:01 2026",
+ "timestampMillis": "1788600601112",
+ "status": {
+  "cmdId": "9e3b9d4e-d7da-4d1d-b5ce-af360e000374",
+  "state": "CS_PASSED"
+ }
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_Report",
+ "dateTimestamp": "Sat Sep  5 17:30:01 2026",
+ "timestampMillis": "1788600601208",
+ "report": {
+  "path": "/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/_x/reports/link/v++_link_krnl_vadd_guidance.html",
+  "name": "",
+  "fileType": "HTML",
+  "reportType": "GLOBAL_RULECHECK_GUIDANCE",
+  "cmdId": ""
+ }
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_Report",
+ "dateTimestamp": "Sat Sep  5 17:30:01 2026",
+ "timestampMillis": "1788600601208",
+ "report": {
+  "path": "/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernel/_x/v++_link_krnl_vadd_guidance.pb3",
+  "name": "",
+  "fileType": "BINARY_PROTOBUF",
+  "reportType": "GLOBAL_RULECHECK_GUIDANCE",
+  "cmdId": ""
+ }
+}
+</ENTRY>
