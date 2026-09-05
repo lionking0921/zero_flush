@@ -1061,6 +1061,7 @@ set(SOURCES
         zeroflush/sealed_file_cache.cc
         zeroflush/slim_memtable.cc
         zeroflush/materialize_job.cc
+        zeroflush/zf_seal.cc
         zeroflush/zeroflush_db.cc)
 
 list(APPEND SOURCES
@@ -1710,6 +1711,14 @@ if(WITH_BENCHMARK_TOOLS)
   add_executable(zf_test${ARTIFACT_SUFFIX}
     tools/zf_test.cc)
   target_link_libraries(zf_test${ARTIFACT_SUFFIX}
+    ${ROCKSDB_LIB} ${THIRDPARTY_LIBS})
+
+  add_executable(zf_seal_check${ARTIFACT_SUFFIX}
+    tools/zf_seal_check.cc)
+  target_include_directories(zf_seal_check${ARTIFACT_SUFFIX} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(zf_seal_check${ARTIFACT_SUFFIX}
     ${ROCKSDB_LIB} ${THIRDPARTY_LIBS})
 
   add_executable(cache_bench${ARTIFACT_SUFFIX}
