@@ -75,7 +75,9 @@ cmake .. -DCMAKE_BUILD_TYPE=Release && make -j$(nproc) db_bench zf_test
 - `output/zeroflush_m3_perf/integrated_report/REPORT.md` —— 综合实验报告（E1-E7 全系列 + 数据附件清单）
 - `docs/ZF_MilestoneEFG_CSD_Final_Report.md` —— CSD-FPGA A+B 卸载里程碑 E·F·G 最终报告
   （hw 综合 + 真卡端到端 · 引擎写档锁 + `csd_materialize` 深接 · 双后端等价）
-- `AcceleratorKernelSstV2/README.md` —— FPGA 加速器各里程碑（M1/顺序窗/A+B/E·F 小节）
+- `AcceleratorKernelSstV2/README.md` —— FPGA 加速器各里程碑（M1/顺序窗/A+B/E·F/阶段 I）
+  （阶段 I = 真重写「裁剪/compaction mode」内核：mode2=每 user 键留最新版（含 tombstone）
+  CPU-sim 证明 10/10 + 引擎封口直读锚定 20/20；encoder 文件收尾鲁棒性修复；本阶段不含综合）
 
 ## 说明
 

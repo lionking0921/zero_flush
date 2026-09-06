@@ -292,3 +292,92 @@ g++ -std=c++17 -O1 -pthread -DHLS_STREAM_THREAD_SAFE -I ../kernel -I ../host \
   ./build/zf_csd_test                          # host 回落等价（无设备）
   ./build/zf_csd_test --xclbin ../AcceleratorKernelSstV2/build/hw/krnl_vadd.xclbin --device 0  # 真卡卸载
   ```
+
+---
+
+# 阶段 I：真重写「裁剪 / compaction mode」内核 —— 代码正确性（不含综合）
+
+> 背景：引擎 host 归并（`MaterializeMergePartition` → `CompactionIterator`，无快照）语义 =
+> **每 user 键只留最新版（最高 seq），最新为 kTypeDeletion 则保留 tombstone**。kernel
+> `mode=1` 是「全版本保留」，与此不等价 ⇒ 真重写归并此前不可卸载。本阶段把「A∪B 裁剪」
+> 固化为显式档位 `mode=2`，并用 CPU-sim（**不综合**，真内核整 TU include）证明裁剪输出 ==
+> 每键最新版（含 tombstone）预言机；产物经引擎封口字节直读可锚定。hw/sw_emu 综合、引擎
+> 写侧深接（ZfCsdSession 真重写会话）、阶段 H 基准 = 后续里程碑，本阶段不执行。
+
+## mode 语义（`host_data[15]`，`krnl_vadd()` 显式归一映射）
+
+| mode | keep_all | encoder 语义 | 驱动方 |
+|---|---|---|---|
+| 0 | 0 | M3 aux-sort 裁剪（单 A 口，同 user 只留最新） | `main_zf` 默认（M3 真卡回归） |
+| 1 | 1 | A+B 全版本保留（同 user 连续版本逐条落盘） | CPU-sim AB / `main_zf --ab` |
+| 2 | 0 | A+B compaction/trim（B 口可带；每 user 键只留最新版 = 引擎真重写归并卸载档） | 引擎卸载路径（后续里程碑） |
+
+映射代码：`keep_all_versions = (mode == 1) ? 1 : 0`。**档位是主机契约命名，encoder 内部只
+区分「裁剪 / 全保留」两态**；mode 传 2 原本会落入非 0 分支被误当全版本保留，故必须在此
+显式归一。encoder 裁剪核心：`keep_all==0` 时 `same_user_key(last, now)` 命中即抑制本条
+（合并流 internal-key 升序 ⇒ 段内首条 = 最高 seq = 最新版被保留）。
+
+## encoder 文件收尾鲁棒性修复（流尾被裁剪抑制 → file_num=0 的潜在内核 bug）
+
+裁剪模式下若**合并流最后一条被抑制**（某 user 的旧版本排到流尾，典型：max-user 多版本），
+原实现的文件收尾（`i == kv_sum-1`）位于 valid 分支（else）内，走 invalid 路径永不触发 ⇒
+文件不 close、`output_file_num` 停留 0、整份产物丢失。`zf_cpu_sim_trim` 的 `t7_pure_b_dense_mv`
+（24 条 8 user、max-user 旧版压尾）稳定复现（decoder/merge 均已证明正确，纯 encoder 问题）。
+
+修复（`krnl_vadd.cpp` encoder）：把「New file」收尾块**移出 else 到循环体层**，加
+`pps_kernel[PPS_ENTRIES_OFF+pps_offset] != 0` 守卫（防超 file_limit 切文件后流尾全抑制时
+误 close 空文件）。keep_all=1（无抑制）与 keep_all=0 且末条有效的原路径均在各自迭代照常
+收尾，**零行为回归**（AB 7/7 原样复绿）。
+
+## CPU-sim 裁剪套件（`test/zf_cpu_sim_trim.cpp`）
+
+镜像 `zf_cpu_sim_ab.cpp` 骨架（fork + 60s 看门狗、include 真内核、`RunAB(slots, keep_all, kv_sum)`），
+每 case 跑 `keep_all=0`、`kv_sum=全部输入版本数`（抑制记录仍被消费，与 AB 的 N 计数同口径）。
+裁剪预言机 `TrimToNewest`：对 `sc.oracle`（已按 user 升/seq 降排序）每 user 段取**首条**
+（= 最新版），段首为 kTypeDeletion 时保留该 tombstone；期望条数 = distinct user 数。
+逐 case `CheckOutputTrim` 比对 ik/vlen/value/tombstone + PPS 计数/极值/raw 尺寸，`file_num==1`。
+
+case 矩阵 = AB 的 S0–S6（富语料复用）+ 裁剪特化 T7/T8/T9：
+
+| case | 输入 | 覆盖点 |
+|---|---|---|
+| s0–s6 | AB 同款 | 仅 B / B 链 / 单口多版 / 跨口遮蔽 / A-over-B / bulk / 值长边界 |
+| t7 | 纯 B | 密集多版（8 user × 3 版，24 条）削到 8；**max-user 旧版压流尾**（回归文件收尾修复） |
+| t8 | A 全遮蔽 B | A 全量盖 B（B 该区全不可见）；A1 追加新键 + 删除；存活 2 tombstone |
+| t9 | A>B>A 交错 | 同 user 跨 A→B→A 取最高 seq；u230/u231 后写覆盖、u232 旧版削、u233 删除保活 |
+
+编译运行：
+
+```bash
+g++ -std=c++17 -O1 -pthread -DHLS_STREAM_THREAD_SAFE -I ../kernel -I ../host \
+    -I /tools/Xilinx/Vitis_HLS/2022.2/include test/zf_cpu_sim_trim.cpp -o /tmp/zf_cpu_sim_trim
+/tmp/zf_cpu_sim_trim                 # 10/10 PASS
+/tmp/zf_cpu_sim_trim -o dump/trim    # 另落 .prefix/.expect（I-2 锚定输入）
+```
+
+## 引擎读取锚定（I-2）：裁剪产物 = 引擎可读 §14.6 SST
+
+`-o dump/trim` 产出每 case `.prefix`（header `num_deletions`=存活删除数）+ `.expect`（裁剪
+预言机逐行 `hex(32B ik)\thex(值)`），B 输入另落 `*_binput<N>.prefix`（keep-all 原始 SST 锚）。
+逐 `.prefix` 经 `../source/rocksdb-zeroflush/build/zf_seal_check`（ZfSeal 封口 → 引擎
+SstFileReader Open / VerifyChecksum / VerifyNumEntries / 全键迭代），stdout 行集与 `.expect`
+**逐字节 diff 一致**：
+
+```bash
+ZSC=../source/rocksdb-zeroflush/build/zf_seal_check
+for p in dump/trim/*.prefix; do
+  diff <("$ZSC" "$p" 2>/dev/null | grep -E '^[0-9a-f]{64}	') "${p%.prefix}.expect" \
+    && echo "OK $p"
+done
+```
+
+**结果 20/20**：10 个裁剪输出（含 trim 到 8 条的 t7、A 全遮蔽 B 的 t8、删后重写/交错 t9）+ 10 个
+B 输入锚，引擎逐块 masked-crc32c 强校验 + 直读全部干净，记录集与各预言机逐字节吻合。
+
+## 语义边界 / 后续
+
+- 裁剪目标 = **无活跃用户快照**的引擎归并语义（每 user 键最新版；最新为删除则保留 tombstone）。
+  **快照分带保留**（同一键在多个快照带各留最新）本阶段不做 —— 未来引擎接缝以「无活跃用户快照」
+  （snapshot_seqs 仅 tip 或空）为卸载门，有快照回落 host。
+- 回归：`zf_cpu_sim_ab`（mode1/keep_all=1）**7/7 原样**；`zf_cpu_sim_trim` **10/10**；
+  `zf_seal_check` 锚定 **20/20**。引擎树零改动；未综合（无 v++ hw/sw_emu）；阶段 H 基准不执行。

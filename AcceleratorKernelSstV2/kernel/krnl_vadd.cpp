@@ -3387,7 +3387,7 @@ void encoder(hls::stream<fifo_key_meta> &input_km, hls::stream<fifo_value_slice>
              hls::stream<ap_uint<2> > &merge_result, ap_uint<32> kv_sum,
              ap_uint<128>* sst_buffer, ap_uint<128>* index_block_result,
              uint64_t *output_data, ap_uint<40> file_limit,
-             ap_uint<32> keep_all_versions = 0  // 0 = M3 aux-sort 去重；1 = A+B 全版本保留
+             ap_uint<32> keep_all_versions = 0  // 0 = 裁剪/compaction 语义（M3 aux-sort 去重 = mode0；A∪B 真重写归并卸载 = mode2）；1 = A+B 全版本保留
             )
 {
     //Detect same key
@@ -3463,8 +3463,11 @@ void encoder(hls::stream<fifo_key_meta> &input_km, hls::stream<fifo_value_slice>
         //     last_user_key.set_empty();
         //     now_km.key.set_empty();
         // }
-        // find a "deletion" key record (M3 aux-sort 去重；keep_all_versions=1 时跳过抑制，
-        // 同 user 连续版本（seq 降序）按完整内部键逐条落盘 —— A+B 全版本保留模式)
+        // 裁剪/compaction 核心：keep_all_versions==0（M3 mode0 或 A∪B 归并卸载 mode2）时，
+        // 对同 user 键（last_user_key vs now_km.key，屏蔽 seq/type 尾 8B）的后续版本整体抑制
+        // —— 合并流按 internal-key 升序（user 升、seq 降），故段内首条 = 最高 seq = 最新版
+        // 被保留；最新版为 kTypeDeletion 时该 tombstone 记录照常保留（引擎无快照归并语义）。
+        // keep_all_versions=1（A+B 全版本保留）时跳过抑制，同 user 连续版本按完整内部键逐条落盘。
         if (keep_all_versions == 0 &&
             last_user_key.length == now_km.key.length && same_user_key(last_user_key, now_km.key))
         {
@@ -3652,128 +3655,136 @@ void encoder(hls::stream<fifo_key_meta> &input_km, hls::stream<fifo_value_slice>
                 chrono_print_time("encoder new data block");
             }
 
-            //New file
-            if ((sst_index + 5200 > file_limit && output_file_num < MAX_OUTPUT_FILE_NUM) || i == kv_sum-1)
-            // if (sst_index + 4096 > file_limit && output_file_num < MAX_OUTPUT_FILE_NUM)
+
+        }   // ---- else（valid 分支）在此结束 ----
+
+        // 文件收尾关闭块：从 else(valid) 内移出到循环体层 —— 否则当合并流最后一条被
+        // 裁剪抑制（keep_all=0/mode0/mode2 下某 user 的旧版本排到流尾，走上方 invalid
+        // 路径）时，i==kv_sum-1 的收尾永不触发，文件不 close、output_file_num 停留 0，
+        // 整份产物丢失（zf_cpu_sim_trim t7 复现：24 条 8 user、max-user 旧版压尾）。
+        // entries 守卫：超 file_limit 切文件后若流尾全为抑制记录，新文件 0 条不误 close。
+        // keep_all=1 无抑制、keep_all=0 且末条有效的原路径不受影响（仍在该迭代收尾）。
+        //New file
+        if (pps_kernel[PPS_ENTRIES_OFF+pps_offset] != 0 &&
+            ((sst_index + 5200 > file_limit && output_file_num < MAX_OUTPUT_FILE_NUM) || i == kv_sum-1))
+        // if (sst_index + 4096 > file_limit && output_file_num < MAX_OUTPUT_FILE_NUM)
+        {
+            std::cout << "output file num: " << output_file_num << std::endl;
+            // 创建新文件时，无需考虑sst_buffer，因为主机以sst_index确定文件结束位置
+            // 但需要考虑最后一个data_block可能尚未写入的重启点、数量和校验和，因为index block需要data_block的最终信息
+            // TODO: 还是有bug，不是这里的问题？
+            if (data_block_index != 0)
             {
-                std::cout << "output file num: " << output_file_num << std::endl;
-                // 创建新文件时，无需考虑sst_buffer，因为主机以sst_index确定文件结束位置
-                // 但需要考虑最后一个data_block可能尚未写入的重启点、数量和校验和，因为index block需要data_block的最终信息
-                // TODO: 还是有bug，不是这里的问题？
-                if (data_block_index != 0)
-                {
-                    // data_block_restart_point[data_block_restart_point_num] = data_block_index;
-                    // data_block_restart_point_num++;
+                // data_block_restart_point[data_block_restart_point_num] = data_block_index;
+                // data_block_restart_point_num++;
 
-                    putRestartPoint_encoder_for_datablock(data_block_restart_point, data_block_restart_point_num, data_block_buffer_bram, bram_read_index);
-                    data_block_index += (data_block_restart_point_num + 1) * 4;
-                    bram_read_index += (data_block_restart_point_num + 1) * 4;
+                putRestartPoint_encoder_for_datablock(data_block_restart_point, data_block_restart_point_num, data_block_buffer_bram, bram_read_index);
+                data_block_index += (data_block_restart_point_num + 1) * 4;
+                bram_read_index += (data_block_restart_point_num + 1) * 4;
 
-                    ap_uint<35> data_block_handle_offset;
-                    ap_uint<16> data_block_handle_size;
-                    data_block_handle_offset = sst_index;
-                    data_block_handle_size = data_block_index;
+                ap_uint<35> data_block_handle_offset;
+                ap_uint<16> data_block_handle_size;
+                data_block_handle_offset = sst_index;
+                data_block_handle_size = data_block_index;
 
-                    putBlockHandle(pre_key, /* index_block_pre_key, */index_block_entry_size,
-                                        data_block_handle_offset, data_block_handle_size,
-                                        index_block_index, index_block_result, index_block_offset,
-                                        index_block_restart_point, index_block_restart_point_num);
+                putBlockHandle(pre_key, /* index_block_pre_key, */index_block_entry_size,
+                                    data_block_handle_offset, data_block_handle_size,
+                                    index_block_index, index_block_result, index_block_offset,
+                                    index_block_restart_point, index_block_restart_point_num);
 
-                    // (里程碑 3) 真 crc32c trailer —— 同站点 1，块内容仍在 bram
-                    ap_uint<32> zf_data_crc2 =
-                        zf_crc_block(data_block_buffer_bram, pre_page_change_remain, data_block_index);
-                    ap8to128_encoder(0, data_block_buffer_bram, bram_read_index);
-                    ap32to128_encoder(zf_data_crc2, data_block_buffer_bram, bram_read_index+1);
-                    bram_read_index+=5;
-                    data_block_index+=5;
+                // (里程碑 3) 真 crc32c trailer —— 同站点 1，块内容仍在 bram
+                ap_uint<32> zf_data_crc2 =
+                    zf_crc_block(data_block_buffer_bram, pre_page_change_remain, data_block_index);
+                ap8to128_encoder(0, data_block_buffer_bram, bram_read_index);
+                ap32to128_encoder(zf_data_crc2, data_block_buffer_bram, bram_read_index+1);
+                bram_read_index+=5;
+                data_block_index+=5;
 
-                    // copy data block on bram to sst buffer on dram
-                    // copy_write_burst_io(sst_index, data_block_index, data_block_buffer_bram, sst_buffer);
-                    ap128to128_encoder(data_block_buffer_bram, sst_buffer, sst_index + sst_offset, data_block_index + pre_page_change_remain + 16);
+                // copy data block on bram to sst buffer on dram
+                // copy_write_burst_io(sst_index, data_block_index, data_block_buffer_bram, sst_buffer);
+                ap128to128_encoder(data_block_buffer_bram, sst_buffer, sst_index + sst_offset, data_block_index + pre_page_change_remain + 16);
 
-                    //copy last page to first page
-                    data_block_buffer_bram[0] = data_block_buffer_bram[bram_read_index.range(15,4)];
+                //copy last page to first page
+                data_block_buffer_bram[0] = data_block_buffer_bram[bram_read_index.range(15,4)];
 
-                    // create new data block
-                    // data_block_head = sst_pointer;
-                    sst_index += data_block_index;
+                // create new data block
+                // data_block_head = sst_pointer;
+                sst_index += data_block_index;
 
-                    // modify properties
-                    // properties.num_data_blocks++;
-                    pps_kernel[PPS_DATABLOCK_NUM_OFF+pps_offset]++;
-                    // properties.data_size += data_block_index->front;
-                    pps_kernel[PPS_DATASIZE_OFF+pps_offset] += data_block_index;
-                    // reset data block index
-                    data_block_index = 0;
-                    // bram_read_index.range(3,0) = sst_index.range(3,0);
-                    // bram_read_index.range(15,4) = 0;
+                // modify properties
+                // properties.num_data_blocks++;
+                pps_kernel[PPS_DATABLOCK_NUM_OFF+pps_offset]++;
+                // properties.data_size += data_block_index->front;
+                pps_kernel[PPS_DATASIZE_OFF+pps_offset] += data_block_index;
+                // reset data block index
+                data_block_index = 0;
+                // bram_read_index.range(3,0) = sst_index.range(3,0);
+                // bram_read_index.range(15,4) = 0;
 
-                    // pre_page_change_remain = sst_index.range(3,0);
-                }
-                else
-                {
-                    // ap32to128_encoder_index_block(0x0103070F, index_block_result, index_block_index+1);
-                    // ap32to128_encoder_index_block(0x1F3F7FFF, index_block_result, index_block_index+1);
-                    // 最后的略过的128位还没写进去
-                    ap128to128_encoder(data_block_buffer_bram, sst_buffer, sst_index + sst_offset, 16);
-                    // ap128to128_encoder(data_block_buffer_bram, sst_buffer, sst_index + sst_offset, 128);
-                }
-
-                pps_kernel[PPS_INDEXBLOCK_OFFSET_OFF+ pps_offset] = sst_index;
-                // pps_kernel[PPS_LARGESETKEY_OFF +pps_offset] = pre_key.range(63, 0);
-                // pps_kernel[10+pps_offset] = pre_key.range(127, 64);
-                pps_kernel[PPS_LARGESTKEY_LENGTH_OFF+pps_offset] = pre_key.length;
-                for (ap_uint<8> i = 0; i < KEY_ARRAY_LENGTH; i++)
-                {
-            #pragma HLS UNROLL
-                    // danger: 目前KEY_BITWIDTH写死128位
-                    pps_kernel[PPS_LARGESTKEY_OFF+pps_offset+i*KEY_BITWIDTH/64] = pre_key.c[i].range(63, 0);
-                    pps_kernel[PPS_LARGESTKEY_OFF+pps_offset+i*KEY_BITWIDTH/64+1] = pre_key.c[i].range(127, 64);
-                }
-                pps_kernel[PPS_MINSEQ_OFF+pps_offset] = minSeqno;
-                pps_kernel[PPS_MAXSEQ_OFF+pps_offset] = maxSeqno;
-
-                //put index block
-                // std::cout << "index block put restart point" << std::endl;
-                putRestartPoint_encoder_for_indexblock(index_block_restart_point, index_block_restart_point_num, index_block_result, index_block_index);
-                index_block_index += (index_block_restart_point_num + 1) * sizeof(uint32_t);
-                index_block_restart_point_num=1;
-                index_block_restart_point[0]=0;
-
-                // (里程碑 3) 真 crc32c trailer：索引块内容顺序直写 DRAM，无页携带，
-                // 块尾对 [index_block_offset, index_block_index) 读回一次算 CRC，
-                // checksum = Mask(crc32c(内容 || 0x00)) —— 与 data 块同一语义。
-                ap_uint<32> zf_index_crc =
-                    zf_crc_block(index_block_result, index_block_offset, index_block_index - index_block_offset);
-                ap8to128_encoder_index_block(0, index_block_result, index_block_index);
-                ap32to128_encoder_index_block(zf_index_crc, index_block_result, index_block_index+1);
-                index_block_index+=5;
-
-                top_index_block_index[output_file_num]=index_block_index-index_block_offset;
-                top_sst_index[output_file_num]=sst_index;
-                printf("sst_index: %d\n", sst_index);
-
-                //put index block
-                // putRestartPoint_encoder_for_indexblock(index_block_restart_point, index_block_restart_point_num, index_block_result, index_block_index);
-
-                index_block_offset+=(index_block_buffer_size / MAX_OUTPUT_FILE_NUM);
-                pps_offset+=PPS_KERNEL_SINGEL_SIZE;
-                output_file_num++;
-                sst_index=0;
-                // sst_offset=(file_limit*output_file_num / 16) * 16;
-                sst_offset=file_limit*output_file_num;
-                printf("sst_offset: %d\n", sst_offset);
-                bram_read_index=0;
-                pre_page_change_remain=0;
-                index_block_index=index_block_offset;
-
-                minSeqno = 72057594037927935UL;
-                maxSeqno = 0;
-                chrono_print_time("encoder new file");
+                // pre_page_change_remain = sst_index.range(3,0);
+            }
+            else
+            {
+                // ap32to128_encoder_index_block(0x0103070F, index_block_result, index_block_index+1);
+                // ap32to128_encoder_index_block(0x1F3F7FFF, index_block_result, index_block_index+1);
+                // 最后的略过的128位还没写进去
+                ap128to128_encoder(data_block_buffer_bram, sst_buffer, sst_index + sst_offset, 16);
+                // ap128to128_encoder(data_block_buffer_bram, sst_buffer, sst_index + sst_offset, 128);
             }
 
-            
+            pps_kernel[PPS_INDEXBLOCK_OFFSET_OFF+ pps_offset] = sst_index;
+            // pps_kernel[PPS_LARGESETKEY_OFF +pps_offset] = pre_key.range(63, 0);
+            // pps_kernel[10+pps_offset] = pre_key.range(127, 64);
+            pps_kernel[PPS_LARGESTKEY_LENGTH_OFF+pps_offset] = pre_key.length;
+            for (ap_uint<8> i = 0; i < KEY_ARRAY_LENGTH; i++)
+            {
+        #pragma HLS UNROLL
+                // danger: 目前KEY_BITWIDTH写死128位
+                pps_kernel[PPS_LARGESTKEY_OFF+pps_offset+i*KEY_BITWIDTH/64] = pre_key.c[i].range(63, 0);
+                pps_kernel[PPS_LARGESTKEY_OFF+pps_offset+i*KEY_BITWIDTH/64+1] = pre_key.c[i].range(127, 64);
+            }
+            pps_kernel[PPS_MINSEQ_OFF+pps_offset] = minSeqno;
+            pps_kernel[PPS_MAXSEQ_OFF+pps_offset] = maxSeqno;
+
+            //put index block
+            // std::cout << "index block put restart point" << std::endl;
+            putRestartPoint_encoder_for_indexblock(index_block_restart_point, index_block_restart_point_num, index_block_result, index_block_index);
+            index_block_index += (index_block_restart_point_num + 1) * sizeof(uint32_t);
+            index_block_restart_point_num=1;
+            index_block_restart_point[0]=0;
+
+            // (里程碑 3) 真 crc32c trailer：索引块内容顺序直写 DRAM，无页携带，
+            // 块尾对 [index_block_offset, index_block_index) 读回一次算 CRC，
+            // checksum = Mask(crc32c(内容 || 0x00)) —— 与 data 块同一语义。
+            ap_uint<32> zf_index_crc =
+                zf_crc_block(index_block_result, index_block_offset, index_block_index - index_block_offset);
+            ap8to128_encoder_index_block(0, index_block_result, index_block_index);
+            ap32to128_encoder_index_block(zf_index_crc, index_block_result, index_block_index+1);
+            index_block_index+=5;
+
+            top_index_block_index[output_file_num]=index_block_index-index_block_offset;
+            top_sst_index[output_file_num]=sst_index;
+            printf("sst_index: %d\n", sst_index);
+
+            //put index block
+            // putRestartPoint_encoder_for_indexblock(index_block_restart_point, index_block_restart_point_num, index_block_result, index_block_index);
+
+            index_block_offset+=(index_block_buffer_size / MAX_OUTPUT_FILE_NUM);
+            pps_offset+=PPS_KERNEL_SINGEL_SIZE;
+            output_file_num++;
+            sst_index=0;
+            // sst_offset=(file_limit*output_file_num / 16) * 16;
+            sst_offset=file_limit*output_file_num;
+            printf("sst_offset: %d\n", sst_offset);
+            bram_read_index=0;
+            pre_page_change_remain=0;
+            index_block_index=index_block_offset;
+
+            minSeqno = 72057594037927935UL;
+            maxSeqno = 0;
+            chrono_print_time("encoder new file");
         }
+
     }
 /*
 Last block
@@ -4022,7 +4033,7 @@ extern "C"
         ap_uint<64> size[4];
         ap_uint<64> input_kv[4];
         ap_uint<64> input_kv_sum;
-        ap_uint<64> mode;        // [15] 0 = M3 aux-sort 去重；1 = A+B 全版本保留
+        ap_uint<64> mode;        // [15] 0 = M3 aux-sort(裁剪)；1 = A+B 全版本保留；2 = A+B compaction/trim(裁剪，引擎真重写归并卸载档)
         ap_uint<64> port_kind[4];// [16..19] 每口类别：0 = A staged(decoder)；1 = B sst 链(decoder_sst)
 #pragma HLS array_partition variable=buf_offset type=complete dim=1
 #pragma HLS array_partition variable=size type=complete dim=1
@@ -4136,7 +4147,14 @@ extern "C"
         decode_port(sst_input3, input_kv[3], size[3], port_kind[3],
                 decoder_km_stream[3], encoder_value_stream[3]);
 
-        encoder(encoder_km_stream, encoder_value_stream, merge_result_stream, input_kv_sum, sst_buffer, index_block_result, output_data, max_file_size, mode.range(31, 0));
+        // mode 档位（host_data[15]）：0 = M3 aux-sort（单 A，裁剪语义）；
+        //   1 = A+B 全版本保留（keep_all=1）；2 = A+B compaction/trim（引擎真重写归并
+        //   卸载档：B 口允许输入，编码语义与档 0 相同 = keep_all=0 每 user 键只留首条=
+        //   最新版）。此处把非 1 的档位（0 与 2）统一映射到 keep_all_versions=0 裁剪路径
+        //   —— 语义档位是主机契约命名，encoder 内部只区分"裁剪/全保留"两态；mode 传 2
+        //   原本会落入非 0 分支被误当全版本保留，故必须在此显式归一。
+        ap_uint<32> keep_all_versions = (mode.range(31, 0) == 1) ? 1 : 0;
+        encoder(encoder_km_stream, encoder_value_stream, merge_result_stream, input_kv_sum, sst_buffer, index_block_result, output_data, max_file_size, keep_all_versions);
 
         // for (int i = 0; i < MAX_INPUT_FILE_NUM; i++)
         // {

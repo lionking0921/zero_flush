@@ -7,10 +7,12 @@
 // 每个输入口设备缓冲 = [WAL 段字节区 (wal_bytes)] [slim 条目区 (kv_i)]，即 Port::Staged() 原样。
 // host_data[24]: [0..3]=buf_offset(0)  [4]=sst 总预算 [5..8]=wal_bytes[i]
 //               [9]=Σkv  [10..13]=kv_i  [14]=init(0)
-//               [15]=mode(0=M3 去重 / 1=A+B 全版本)  [16..19]=port_kind[i]
+//               [15]=mode(0=M3 aux-sort 裁剪 / 1=A+B 全版本保留 / 2=A+B compaction/trim
+//                    裁剪档，引擎真重写归并卸载专用)  [16..19]=port_kind[i]
 //                    (0=A staged(decoder), 1=B raw-SST 链(decoder_sst))  [20..23]=保留
-// 本文件是 M3 风格 host：全部 4 口 = A staged、mode=0（默认全 0），行为与 M3 一致。
-// A+B（B 口 + mode=1）的真 host 场景属下个里程碑，AB 软件验证走 test/zf_cpu_sim_ab.cpp。
+// 本文件是 M3 风格 host：全部 4 口 = A staged、mode=0（默认全 0），行为与 M3 一致；
+// --ab 时 mode=1（A+B 全版本，kernel 字节 == CPU-sim AB dump）。mode=2 由引擎卸载路径
+// （engine zf_materialize → ZfCsdSession）驱动，不经本文件。
 // 校验：解码内核产物，与去重排序后的 KV 预言机逐条比对（== zf_cpu_sim 的 CPU 语义，经真实内核）。
 //
 // 用法：
