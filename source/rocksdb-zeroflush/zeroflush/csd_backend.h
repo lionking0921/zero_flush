@@ -64,11 +64,14 @@ class ZfCsdSession {
   virtual ~ZfCsdSession() = default;
   // 设备可用性（Probe：能找到 xclbin/设备并建上下文/内核）。
   virtual bool Available() const = 0;
-  // 跑一次 mode=1 A+B；slots 定长 4（空槽 bytes 为空）。sst/idx 为设备侧输出预算。
+  // 跑一次 A+B；slots 定长 4（空槽 bytes 为空）。sst/idx 为设备侧输出预算。
   // 成功时 out->file_num==1，data/index 已取回，pps[0..511] 填满。
+  // mode = kernel host_data[15] 档位（1 = A+B 全版本保留；2 = A+B compaction/trim，
+  // 每 user 键只留最新版含 tombstone = 引擎 kMergeBase 真重写归并卸载档）。
+  // 缺省 1 → 既有 A-only 直装调用零改动。
   virtual ROCKSDB_NAMESPACE::Status RunAb(
       const ZfCsdSlot slots[4], uint64_t kv_sum, uint64_t sst_bytes,
-      uint64_t idx_bytes, ZfCsdOutput* out) = 0;
+      uint64_t idx_bytes, ZfCsdOutput* out, uint32_t mode = 1) = 0;
 };
 
 // 进程级工厂（materialize_job 在卸载编排点调用 CreateZfCsdSession 取会话；

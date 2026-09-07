@@ -381,3 +381,141 @@ B 输入锚，引擎逐块 masked-crc32c 强校验 + 直读全部干净，记录
   （snapshot_seqs 仅 tip 或空）为卸载门，有快照回落 host。
 - 回归：`zf_cpu_sim_ab`（mode1/keep_all=1）**7/7 原样**；`zf_cpu_sim_trim` **10/10**；
   `zf_seal_check` 锚定 **20/20**。引擎树零改动；未综合（无 v++ hw/sw_emu）；阶段 H 基准不执行。
+
+---
+
+# 阶段 J：mode=2 A∪B 真重写归并卸载 + sw_emu/hw 双设备验证
+
+> 把阶段 I 的「裁剪内核」接到引擎**生产归并路径**：kernel `mode=2`（A∪B，每 user 键只留最新，
+> 最新为删除则保 tombstone）语义 = 引擎 `kMergeBase`（CompactionIterator 无快照）卸载档 ⇒
+> 真重写归并可卸载。引擎 lib 保持 XRT-free（设备后端经可选共享库 + weak 符号自动使能）。
+> 正确性在 sw_emu 真设备 + hw 真 U2 卡双端验证。**不做 CPU-vs-CSD 性能比较**（下里程碑）；
+> kernel 源码（`krnl_vadd.cpp:4150-4156` mode 归一映射）不改；3 项既有 L0 `zf_test` 失败不在范围。
+
+## 引擎生产归并接缝（`kMergeBase` → `TryCsdMergeMaterialize`）
+
+- 卸载门（`materialize_job.cc:1521-1532`）：`csd_materialize ∧ A 侧已按 internal comparator
+  排序（aside_sorted = 全版本封存代）` 时尝试设备归并卸载，任一方资格失败即回落 host 原路径
+  （逐字节不变）。快照活跃、孤儿代 seq 前置、A 越界等**恒回落**（阶段 I 语义边界）。附加
+  `kMergeBase` 门（决策 = 融合输出，非攒批）。
+- **双端打包（真重写，非单 A）**：A 侧 = 本分区排序键/值全版本封存代
+  （`BuildCsdSlotAFromSorted`，按 internal key 序重建 ZF01 帧 + slim 索引）；B 侧 =
+  `overlap_all + l0_overlap` 既有 SST 文件字节（`BuildCsdSlotB`，`decoder_sst` 链布局）。一次
+  staged slot 同时携带 A（decode）+ B（decoder_sst），`host_data[15]=mode=2`。
+- 产物：设备按每 user 键最新版（含 tombstone）重写，落盘后 `ZfSeal` 封口为引擎可读 §14.6 SST
+  （F-1 写档锁档位），按 `kMergeBase` 安装替换批内前序。`csd_merge_files` 计数（
+  `csd_backend.cc` 会话回调 + `materialize_job.cc:2289` `ctx_->csd_merge_files_`）；host 侧
+  `base_merge_count` 恒计（证负载确走了归并，不管卸载与否）。
+
+## J-A 设备后端可选自动使能（引擎 lib 恒 XRT-free）
+
+- `csd_backend.cc` 声明 **weak** `extern "C" void zeroflush_csd_register_plugin(void)`；设备后端
+  独立共享库 `libzeroflush_csd.so`（`csd_session_opencl.cc`）导出同名 **strong** 符号。凡进程
+  链接该库（业务方设 `csd_materialize + csd_xclbin`），首次物化时 `MaybeAutoEnableCsdBackend`
+  （`CreateZfCsdSession` 前置）把运行时绑定解析到插件 → 自动注册 XRT/OpenCL 会话工厂
+  （LD_DEBUG 证实 weak→strong 绑定）；未链接 = 符号 null = 静默回落 host，零错排。
+- **死锁修复（sw_emu 实测复现）**：注册路径曾放在 `g_csd_factory_mu` 临界区内调用插件，而插件
+  内部 `RegisterZfCsdSessionFactory` 对同一非递归 mutex 加锁 → 首个物化 worker 自死锁、全 run
+  停滞。修复：`g_auto_csd_tried`（`std::atomic`）先置位 → 恒仅一线程走到，把插件调用移出临界区。
+
+## 引擎变更集（相对阶段 F）
+
+`zeroflush/materialize_job.{h,cc}`（接缝 + `TryCsdMergeMaterialize` + `csd_merge_files` 计数）、
+`zeroflush/csd_backend.{h,cc}`（J-A 自动使能 + 会话回调含 merge 装配）、
+`zeroflush/csd_session_opencl.cc`（`RunAb` override `host_data[15]=mode`）、
+`zeroflush/zeroflush_db.{h,cc}`（选项 + metric 接线）、`tools/zf_csd_test.cc`（merge 场景）、
+`CMakeLists.txt`（`libzeroflush_csd.so` 插件 target）。
+
+## 验证：sw_emu 真设备（post-loop close 版已绿，12:56 xclbin）
+
+`zf_csd_test --merge` 双 DB（host 回落对照 / csd=on 真设备；`sw_emu` 需在 xclbin build 目录放
+`emconfig.json` 并设置 `XCL_EMULATION_MODE=sw_emu`）：
+
+```bash
+cd ../source/rocksdb-zeroflush
+# host 回落对照（不传 xclbin）：offload 接缝可达且零错排
+./build/zf_csd_test --merge
+# csd=on 真设备（sw_emu xclbin 绝对路径）
+XCL_EMULATION_MODE=sw_emu ./build/zf_csd_test --merge \
+  --xclbin ../AcceleratorKernelSstV2/build/sw_emu/krnl_vadd.xclbin --device 0
+```
+
+| 场景 | 结果 | 关键断言 |
+|---|---|---|
+| host 回落 merge（3×） | ALL PASSED | `files==0 ∧ fallbacks>0 ∧ merge_files==0`；`base_merge>0` 证接缝可达 |
+| csd=on merge（sw_emu，3×） | ALL PASSED | `files=48-51 / merge_files=28-31 / fallbacks=0-1 / base_merge>0`；host==csd==oracle；reopen CRC scan==oracle |
+| csd=on direct（sw_emu） | ALL PASSED | `files=216/216 / fallbacks=0`，1920 键 Get/全扫/reopen 等价 |
+| 引擎 `zf_test` 回归 | 36 PASS | 3 项既有 L0 失败不变（不在范围） |
+
+> merge 场景中的 point `Get` 只作为诊断项：post-reopen iterator full-scan 与 reopen SST CRC scan 连续
+> 等于 oracle，而 host-only 回落也可复现同类偶发点查找异常，说明这是 ZeroFlush point-lookup /
+> frozen-index 邻近读路径问题，不是 CSD 输出 SST 字节错。阶段 J 的 CSD 字节等价门为
+> full-scan、reopen CRC scan 与 `csd_merge_files>0`；既有 L0/point-read 问题不在本阶段修复范围。
+
+## hw 真卡（post-loop close 版 300MHz 默认链接进行中）
+
+> 已恢复 a69cf31 可布布局：把 4cc31bb 的 tail file-close 修复从 encoder 主循环无条件层移到 loop 后
+> guarded close，避免改变主循环调度；CPU-sim trim 10/10 PASS，纯 a69cf31 阴性对照 t7 `file_num=0`
+> 证明该 post-loop close 是必要修复。按用户要求：恢复可布后先试 300MHz 默认链接；若 route 本身失败，
+> 再重试 `KFREQ_MHZ=200`。若 route 通但 WNS/TNS 为负，仍生成 bitstream 并上真卡实测。
+
+真 U2 卡（无 `XCL_EMULATION_MODE`，device 0，绝对 xclbin）：
+
+```bash
+cd ../source/rocksdb-zeroflush
+./build/zf_csd_test --merge --xclbin ../AcceleratorKernelSstV2/build/hw/krnl_vadd.xclbin --device 0
+./build/zf_csd_test --xclbin ../AcceleratorKernelSstV2/build/hw/krnl_vadd.xclbin --device 0   # direct
+```
+
+| 场景 | 结果 | 关键断言（填 hw 数字） |
+|---|---|---|
+| csd=on direct（hw） | TBD | files=216/216、fallbacks=0、reopen CRC==oracle |
+| csd=on merge（hw） | TBD | merge_files>0、host==csd==oracle、reopen CRC scan==oracle |
+
+### hw link 拥塞调试记录（route 密度驱动，非时钟驱动）
+
+| 尝试 | link 时钟 | 策略 / kernel 写法 | 结果 |
+|---|---|---|---|
+| j2 300MHz | shell 默认 | 默认 / 4cc31bb 主循环无条件 close | route_design FAILED，global congestion 6-7，局部 88-100% |
+| j3 200MHz | `--kernel_frequency 200` | 默认 / 4cc31bb 主循环无条件 close | **仍 FAILED**，congestion 7（无改善）→ 密度驱动非时序 |
+| j4 200MHz | `--kernel_frequency 200` | `Congestion_SpreadLogic_high` / 4cc31bb 主循环无条件 close | **仍 FAILED**：默认 run + 策略 run 双双 congestion level 6 不可布 —— SpreadLogic_high 非杠杆 |
+| j5 300MHz | shell 默认 | a69cf31 主循环布局 + loop 后 guarded close | **运行中**（`build/hw_synth_j5_300_postloop.log`） |
+
+违规网集中在 decode_port 解码器 ap_enable/ap_start/flow_control 控制信号，4×4 tile 92-95%；
+总 util 并不高（kernel LUT ~42%）→ 结构性局部热点。j4 让 placer 布线前摊开 4 口解码器 +
+encoder（策略 run 用 `AlternateCLBRouting` 指令），仍不可布。
+
+**根因定位（强相关，正在复验）**：对比 git 里**可布的真卡验证 xclbin**（`a69cf31 sw v1.0.0`，
+26.7MB，E-1 300MHz 默认链接即布通 + 真卡 M3 8/8 + AB 7/7）与不可布 .xo（`4cc31bb`）——
+delta = 4cc31bb 把 encoder「文件收尾关闭块」从 `else(valid)` 条件内移到**循环体无条件层**
+（修 t7 流尾被裁剪抑制 → 文件不 close 的 bug）。当前 j5 写法恢复 E-1 主循环结构，只在 loop 后
+用 `pps_kernel[PPS_ENTRIES_OFF+pps_offset] != 0` guard 关闭仍打开的尾文件；已由 CPU-sim 与 sw_emu
+证明 mode=2 字节语义正确，正在用 hw 300MHz 链接验证是否恢复可布。
+
+## mode 占用分析（面积账本）
+
+**问：每个 mode 各需专属加速套件 ⇒ 占用大量 FPGA 资源？**
+
+**答：否 —— 硬件是单流水线共享，mode 只是喂给唯一 encoder 的运行时标量。**
+`krnl_vadd.cpp:4150-4156` `keep_all_versions=(mode==1)?1:0`：encoder 内部只「裁剪/全保留」两态，
+mode 0/2 同走 keep_all=0。面积账本（csynth 实例表，`_x/reports/krnl_vadd/hls_reports/krnl_vadd_csynth.rpt`）：
+
+| 模块 | 实例 | LUT | BRAM | 面积主因 |
+|---|---|---|---|---|
+| decode_port | 4（sst_input0-3 无条件例化） | 4×23,219≈93K | 4×33 | `kind` 运行时 → 每口 decoder(A)+decoder_sst(B) 双常驻 |
+| encoder | 1 | **≈126K（~50%）** | 54 | 4×4096-bit 值流 4:1 仲裁 mux（2×512B 切片，VALUE_LENGTH=1024）+ trim/full 并集 + 块/index/footer |
+| 合计 | | ≈253K（放置后 ~155K/42%） | 186 | BRAM 8.6%，0 URAM/DSP |
+
+- **面积驱动 = 输入并行度（4 口）+ 宽值通路（4×4096-bit），非模式数**。A+B 归并至多 4 输入文件
+  故 4 口常驻；直装只用 slot0 时其余 3 口硬件照付（真实过度供给）。encoder LUT 大户是跨口宽值
+  仲裁，keep_all 两态共用 → 无「模式套件叠加」。总 42% LUT 不算高 ⇒ route 拥塞 = 局部布局热点
+  （4 口解码器 + encoder 挤进紧密区域），非面积绝对不足。
+- 若需减面积（**动内核 + 重综合 + sw_emu mode=2 全语义重验证，超本里程碑**）：减端口
+  （MAX_INPUT_FILE_NUM 4→2）/ 收窄值切片 / mode 专用 encoder。
+
+## 语义边界 / 后续
+
+- 卸载门保留：**无活跃用户快照**才可卸载（快照分带保留不做）；孤儿代、A 越界、资格失败恒回落。
+- kernel 硬限不变（ik==32B、value≤1024B、≤4 口、单文件输出，`krnl_host.h`）。
+- 性能定位（卸载收益数字）不在本里程碑范围，real-card 闭环跑通后另行 bench。
+- 回归：阶段 I CPU-sim（AB 7/7、trim 10/10）原样；引擎 zf_test 36 PASS / 3 既有 L0 失败不变。

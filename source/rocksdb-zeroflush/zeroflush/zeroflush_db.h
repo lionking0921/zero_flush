@@ -350,6 +350,10 @@ class ZeroFlushContext {
   uint64_t csd_files() const;
   uint64_t csd_attempts() const;
   uint64_t csd_fallbacks() const;
+  // 阶段 J：其中「真重写归并（kMergeBase → kernel mode=2）」卸载产出并直装的
+  // 分区 SST 文件数（∈ csd_files）。单独计数供测试断言归并卸载确实发生（仅
+  // csd_files>0 不足以证明：首代直装也会使 files>0）。
+  uint64_t csd_merge_files() const;
 
   ZeroFlushOptions zfo_;
   std::string wal_dir_;       // wal_dir/zfwal
@@ -383,6 +387,8 @@ class ZeroFlushContext {
   std::atomic<uint64_t> csd_files_{0};      // 卸载产出并直装的分区 SST 文件数
   std::atomic<uint64_t> csd_attempts_{0};   // 通过资格并尝试设备 run 的物化次数
   std::atomic<uint64_t> csd_fallbacks_{0};  // 期望卸载却回落 host 的次数
+  // 阶段 J：真重写归并（mode=2）卸载产出并直装的分区 SST 文件数（∈ csd_files_）。
+  std::atomic<uint64_t> csd_merge_files_{0};
 };
 
 // 打开 ZeroFlush DB：

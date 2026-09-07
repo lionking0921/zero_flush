@@ -423,6 +423,8 @@ bool ZeroFlushContext::GetProperty(const std::string& prop,
     *value = std::to_string(csd_attempts());
   } else if (prop == "rocksdb.zeroflush.csd_fallbacks") {
     *value = std::to_string(csd_fallbacks());
+  } else if (prop == "rocksdb.zeroflush.csd_merge_files") {
+    *value = std::to_string(csd_merge_files());
   } else {
     return false;
   }
@@ -532,6 +534,10 @@ uint64_t ZeroFlushContext::csd_attempts() const {
 
 uint64_t ZeroFlushContext::csd_fallbacks() const {
   return csd_fallbacks_.load(std::memory_order_relaxed);
+}
+
+uint64_t ZeroFlushContext::csd_merge_files() const {
+  return csd_merge_files_.load(std::memory_order_relaxed);
 }
 
 uint32_t ZeroFlushContext::pending_epochs(

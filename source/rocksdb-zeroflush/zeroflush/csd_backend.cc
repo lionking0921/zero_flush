@@ -9,6 +9,8 @@
 
 #include "zeroflush/csd_backend.h"
 
+#include <atomic>
+#include <cstdio>
 #include <cstring>
 #include <mutex>
 #include <utility>
@@ -19,6 +21,7 @@
 #include "util/crc32c.h"
 #include "zeroflush/partition_index.h"
 #include "zeroflush/wal_format.h"
+#include "zeroflush/zeroflush_db.h"  // ZeroFlushOptions（csd_materialize/csd_xclbin）
 #include "zeroflush/zf_seal.h"
 
 namespace zeroflush {
@@ -297,10 +300,55 @@ bool ZfCsdManifestFromPps(const uint64_t pps[512], uint64_t data_size,
 }
 
 // ---- 进程级会话工厂（默认无设备：未注册 → Create 返回 nullptr）----
+// 可选设备后端自动使能：引擎 lib 编译/链接均不依赖 XRT。设备后端独立打包为共享库
+// libzeroflush_csd.so（csd_session_opencl.cc，导出 extern C 强符号
+// zeroflush_csd_register_plugin）。凡进程链接了该库（业务方设 csd_materialize +
+// csd_xclbin 即用），本 TU 的 weak 引用在运行时动态链接解析到它 → 首次物化自动注册
+// XRT/OpenCL 会话工厂；未链接 = 符号 null = 设备不可用（静默回落 host，零错排）。
+// 仅 GCC/Clang 支持 weak 属性；MSVC 平台走显式 RegisterZfCsdSessionFactory 路径。
+#if defined(__GNUC__) || defined(__clang__)
+extern "C" void zeroflush_csd_register_plugin(void) __attribute__((weak));
+#endif
+
 namespace {
 std::mutex g_csd_factory_mu;
 ZfCsdSessionFactory* g_csd_factory = nullptr;  // 注册后不再释放（进程级生命周期）
+// 自动使能一次性闸（进程内至多尝试一次；稳态后 CreateZfCsdSession 只付一次 load）。
+std::atomic<bool> g_auto_csd_tried{false};
 }  // namespace
+
+// 每次 CreateZfCsdSession 前调用。调用方明确要求 CSD 卸载（csd_materialize 且给了
+// xclbin）且尚无任何会话工厂注册时，若设备插件已随进程加载则注册之。纯 CPU
+// （csd_materialize=false）或未指定 xclbin 一律不动（含 xclbin="" 的 host 回落档）。
+void MaybeAutoEnableCsdBackend(const ZeroFlushOptions& zfo) {
+#if defined(__GNUC__) || defined(__clang__)
+  if (!zfo.csd_materialize || zfo.csd_xclbin.empty()) {
+    return;
+  }
+  if (g_auto_csd_tried.load(std::memory_order_acquire)) {
+    return;  // 已尝试过（无论是否注册成功）—— 稳态快路径
+  }
+  bool should_register = false;
+  {
+    std::lock_guard<std::mutex> lock(g_csd_factory_mu);
+    if (g_auto_csd_tried.exchange(true, std::memory_order_acq_rel)) {
+      return;  // 并发竞争：他线程已完成
+    }
+    if (g_csd_factory != nullptr) {
+      return;  // 已有显式注册的工厂 —— 不覆盖调用方选择
+    }
+    should_register = (zeroflush_csd_register_plugin != nullptr);
+  }
+  // 临界区外调用插件：zeroflush_csd_register_plugin → RegisterZfCsdSessionFactory
+  // 会对同一把 g_csd_factory_mu 加锁（非递归 mutex），在临界区内调用必自死锁
+  // （sw_emu 实测：引擎多物化 worker 并发，首 worker 持锁卡死 → 全 run 停滞）。
+  // g_auto_csd_tried 已置位 → 恒仅一线程走到此，注册无并发竞争。
+  if (should_register) {
+    zeroflush_csd_register_plugin();
+    fprintf(stderr, "[ZF csd] device backend auto-enabled (plugin linked)\n");
+  }
+#endif
+}
 
 void RegisterZfCsdSessionFactory(ZfCsdSessionFactory f) {
   std::lock_guard<std::mutex> lock(g_csd_factory_mu);
@@ -309,6 +357,7 @@ void RegisterZfCsdSessionFactory(ZfCsdSessionFactory f) {
 }
 
 std::shared_ptr<ZfCsdSession> CreateZfCsdSession(const ZeroFlushOptions& zfo) {
+  MaybeAutoEnableCsdBackend(zfo);  // 首次取会话前给设备插件注册机会
   ZfCsdSessionFactory* f = nullptr;
   {
     std::lock_guard<std::mutex> lock(g_csd_factory_mu);

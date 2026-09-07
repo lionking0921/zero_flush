@@ -152,7 +152,7 @@ class ZfCsdSessionOpencl final : public ZfCsdSession {
 
   ROCKSDB_NAMESPACE::Status RunAb(const ZfCsdSlot slots[4], uint64_t kv_sum,
                                   uint64_t sst_bytes, uint64_t idx_bytes,
-                                  ZfCsdOutput* out) override {
+                                  ZfCsdOutput* out, uint32_t mode) override {
     // 引擎物化以 materialize_parallelism 个 worker 并行调用本会话；内核为单实例
     // （nk=krnl_vadd:1），cl::CommandQueue / cl::Kernel 非线程安全 → 整段串行化。
     // 设备侧本就必须一次一 run（单内核），互斥不损吞吐。
@@ -204,7 +204,7 @@ class ZfCsdSessionOpencl final : public ZfCsdSession {
       host_data[10 + p] = kv[p];
     }
     host_data[9] = kv_sum;   // 输出记录总数（encoder 精确计数，不可下溢）
-    host_data[15] = 1;       // mode=1 A+B 全版本
+    host_data[15] = mode;    // mode 档位：1 = A+B 全版本；2 = A+B compaction/trim
     for (uint32_t p = 0; p < 4; ++p) host_data[16 + p] = kind[p];
     cl::Buffer host_dev =
         MakeBuf(c_, sizeof(host_data), &ok);
@@ -307,6 +307,16 @@ void RegisterZeroFlushCsdOpenclSessionFactory() {
 void ShutdownZeroFlushCsdSession() {
   std::lock_guard<std::mutex> lock(g_session_mu);
   g_session.reset();  // 析构 ZfCsdSessionOpencl → OcCtx 的 cl 对象，仍在作用域内
+}
+
+// ---- 设备插件导出入口（libzeroflush_csd.so 全局强符号）----
+// 供引擎 librocksdb 的 weak 引用自动发现（csd_backend.cc MaybeAutoEnableCsdBackend）：
+// 进程链入本库后，引擎在 csd_materialize 开启且首次取会话时自动调用本入口注册
+// XRT/OpenCL 会话工厂 —— 业务方无需在代码里显式注册，仅需链接本库并设置
+// ZeroFlushOptions{csd_materialize=true, csd_xclbin=..., csd_device=...}。
+// extern "C" 保证 unmangled 全局符号（弱引用按 C 链接名解析）。
+extern "C" void zeroflush_csd_register_plugin() {
+  RegisterZeroFlushCsdOpenclSessionFactory();
 }
 
 }  // namespace zeroflush

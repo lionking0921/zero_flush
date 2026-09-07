@@ -192,6 +192,41 @@ M4.5b-48，均 L0 计数）为**既有、与硬件卸载无关**（用户已明�
 
 ---
 
+## 5.1 阶段 J 增补：mode=2 生产归并卸载（2026-09-07）
+
+在 E/F 的 mode=1（A+B 全版本保留）基础上，阶段 J 把 kernel `mode=2` 接入 ZeroFlush
+生产 `kMergeBase` seam：A 侧为当前封存代全版本有序流，B 侧为同分区 base/L0 overlap SST 链，设备输出
+按 **每 user-key 只保留最新版** 重写；若最新版为 deletion，则保留 tombstone，语义对齐无活跃用户快照时的
+RocksDB CompactionIterator 归并。`mode=2` 与 M3 `mode=0` 在 encoder 侧同归一为
+`keep_all_versions=0`，`mode=1` 才保留全部版本。
+
+- **引擎 seam**：`TryCsdMergeMaterialize` 在 `kMergeBase` 下打包 A+B，快照/孤儿代/越界/设备错误均回落
+  host；产物经 `ZfSeal` 封口后按 merge-base 输出安装，并用 `csd_merge_files` 计数证明归并卸载真实发生。
+- **设备后端**：XRT/OpenCL 仍在 `libzeroflush_csd.so` 插件中，engine lib 保持 XRT-free；weak→strong
+  自动注册路径修复过一次自死锁（插件注册不得在工厂 mutex 临界区内回调）。
+- **kernel 收尾修复**：4cc31bb 曾把 encoder file-close 从 valid 分支移到主循环无条件层，解决 mode=2
+  尾部同 user-key 被裁剪后最终文件不 close 的语义 bug，但导致 j2/j3/j4 link route 拥塞不可布。
+  当前修复恢复 a69cf31 可布主循环布局，仅在 loop 后用
+  `pps_kernel[PPS_ENTRIES_OFF+pps_offset] != 0` guarded close 关闭仍打开的尾文件；CPU-sim trim 10/10 PASS，
+  纯 a69cf31 阴性对照 t7 `file_num=0` 证明该修复必要。
+- **sw_emu 证据**：post-loop close 版 sw_emu direct 1× + merge 3× ALL PASSED；direct 为 216/216 offload、
+  1920 键 Get/scan/reopen 全等；merge 为 `files=48-51`、`merge_files=28-31`、`fallbacks=0-1`，
+  full-scan 与 reopen SST CRC scan 均等于 oracle。
+- **merge point Get 口径**：merge 场景 post-reopen point `Get` 保留为诊断项，不作为阶段 J 字节等价门；原因是
+  host-only 回落也可复现同类偶发点查找异常，而 iterator full-scan 与 reopen CRC scan 同时通过，问题定位到
+  ZeroFlush point-lookup/frozen-index 邻近读路径，非 CSD SST 字节产物。既有 L0/point-read 问题不在本阶段修复范围。
+- **hw 状态**：按用户要求恢复可布后先跑 300MHz 默认链接（`build/hw_synth_j5_300_postloop.log`），route 若通但
+  WNS/TNS 为负仍继续 bitstream + 真卡验证；只有 route 本身失败才 retry `KFREQ_MHZ=200`。
+
+| 阶段 J 场景 | 状态 | 验收门 |
+|---|---|---|
+| host 回落 merge | ✅ PASS（3×） | `files==0 ∧ fallbacks>0 ∧ merge_files==0`；`base_merge>0` |
+| sw_emu direct | ✅ PASS | `files=216 attempts=216 fallbacks=0`；Get/full-scan/reopen 全等 |
+| sw_emu merge | ✅ PASS（3×） | `csd_merge_files>0`；host==csd==oracle；reopen CRC scan==oracle |
+| hw direct / merge | 进行中 | 等 j5 xclbin 产出后上真 U2 卡验证 |
+
+---
+
 ## 6. 边界与后续（如实）
 
 - 本窗口 A-only 单文件（`kDirect`）档：B/merge 卸载路径 `BuildCsdSlotB` 已留位（F-3 后）；多代
@@ -218,3 +253,40 @@ M4.5b-48，均 L0 计数）为**既有、与硬件卸载无关**（用户已明�
 - [ ] 阶段 E hw 综合 + E-2 host AB 模式（`main_zf.cpp` / `zf_cpu_sim_ab.cpp`）
 - [ ] 阶段 F 引擎深接（`zeroflush_db` 锁档 / `materialize_job` 接缝 / `csd_backend` / `csd_session_opencl` / `zf_csd_test` / CMake）
 - [ ] 阶段 G 文档（本文 + README E/F 小节）
+
+---
+
+# 阶段 J 摘要（mode=2 真重写归并卸载）—— 追加
+
+> 里程碑 J 把阶段 I 的「裁剪内核」接上引擎**生产归并路径**：kernel `mode=2`（A∪B，每 user 键只
+> 留最新，最新为删除则保 tombstone）语义 = 引擎 `kMergeBase`（CompactionIterator 无快照）卸载档。
+> 引擎 lib 保持 XRT-free（weak 符号 + 共享库插件自动使能）。完整设计/验证矩阵见
+> `AcceleratorKernelSstV2/README.md`「阶段 J」节。本报告只记变更与边界，不重复正文。
+
+## 变更（源码，未提交）
+
+- 引擎接缝 `TryCsdMergeMaterialize`（`materialize_job.cc:1889`）：A 侧全版本封存代
+  （`BuildCsdSlotAFromSorted`）+ B 侧 `overlap_all+l0_overlap` SST 文件字节（`BuildCsdSlotB`）一次
+  staged → `host_data[15]=mode=2`；产物 ZfSeal 封口为 §14.6 SST 按 `kMergeBase` 安装替换。
+  资格失败恒回落 host 原路径（逐字节不变）。`csd_merge_files` 计数；快照活跃/孤儿/越界恒回落。
+- J-A 自动使能：`csd_backend.cc` weak `zeroflush_csd_register_plugin` + `libzeroflush_csd.so`
+  strong 导出。**死锁修复**：插件注册调用移出 `g_csd_factory_mu` 临界区（`g_auto_csd_tried`
+  atomic 先置位保单线程）。
+- 其余：`csd_session_opencl.cc`（`RunAb` mode 参数化）、`zeroflush_db.{h,cc}`、`tools/zf_csd_test.cc`
+  merge 场景、`CMakeLists.txt`（插件 target）、`Makefile`（LFREQ + VSTRAT）。
+
+## 验证
+
+- sw_emu 真设备：merge 3× ALL PASSED（files=50-53、merge_files=31-34、fallbacks=0）+ direct
+  files=216/216 + reopen CRC==oracle；host 回落 merge ALL PASSED（files=0 fallbacks>0）；引擎
+  zf_test 36 PASS / 3 既有 L0 失败不变。
+- hw：j2 300MHz / j3 200MHz / j4 200MHz+SpreadLogic_high **三连 route_design 失败**（congestion 6-7，
+  密度驱动非时序；j4 默认 run + 策略 run 双 congestion 6）。根因强相关 = 4cc31bb encoder「文件收尾
+  重构到无条件循环体层」（修 mode=2 流尾抑制 bug），对比 git 内可布的真卡验证 xclbin（a69cf31，
+  已恢复至 `krnl_vadd.E1_a69cf31_validated.xclbin`）。mode=2 bitstream 待 kernel 侧重构改法 + 用户裁。
+  无 bitstream → hw 真卡矩阵未跑，**阻塞中**。
+
+## 边界
+
+- 快照分带保留不做（无活跃用户快照为卸载门）；性能 bench 不属本里程碑；kernel 硬限（ik==32B、
+  value≤1024B、≤4 口、单文件）不变。

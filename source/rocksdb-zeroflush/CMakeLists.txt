@@ -1722,32 +1722,38 @@ if(WITH_BENCHMARK_TOOLS)
   target_link_libraries(zf_seal_check${ARTIFACT_SUFFIX}
     ${ROCKSDB_LIB} ${THIRDPARTY_LIBS})
 
-  # ---- F-3：zf_csd_test —— CSD 双后端等价 + 真卡物化（链 XRT/OpenCL 设备会话；
-  # ---- 仅本工具 TU 编译 zeroflush/csd_session_opencl.cc，引擎 lib 恒 XRT-free）。
-  # ---- XRT 缺失 → 目标跳过（工程可在无加速器环境编译/跑 zf_test 全绿）。
+  # ---- F-3/阶段 J：CSD 双后端等价 + 真卡物化。设备后端打包为独立共享库
+  # ---- libzeroflush_csd.so（zeroflush/csd_session_opencl.cc 的唯一宿主）。引擎
+  # ---- librocksdb 以 weak 引用自动发现其 zeroflush_csd_register_plugin（见
+  # ---- csd_backend.cc MaybeAutoEnableCsdBackend）：业务方链接本库 + 设
+  # ---- csd_materialize/csd_xclbin 即自动走 CSD 卸载，不链本库 = 纯 CPU ——
+  # ---- 引擎 lib 恒 XRT-free。XRT 缺失 → 目标跳过（无加速器环境编译/跑全绿）。
   if(NOT DEFINED ZF_XRT_ROOT)
     set(ZF_XRT_ROOT "/opt/xilinx/xrt")
   endif()
   # cl2.hpp 由 XRT 包装到系统 /usr/include/CL；此处仅需链 XRT 运行库。
   if(EXISTS "${ZF_XRT_ROOT}/lib/libxilinxopencl.so")
-    add_executable(zf_csd_test${ARTIFACT_SUFFIX}
-      tools/zf_csd_test.cc
-      zeroflush/csd_session_opencl.cc)
-    target_include_directories(zf_csd_test${ARTIFACT_SUFFIX} PRIVATE
+    # 可选 CSD 设备后端共享库：链上即自动使能真卡卸载；不链 = 纯 CPU（零错排回落）。
+    add_library(zeroflush_csd SHARED zeroflush/csd_session_opencl.cc)
+    target_include_directories(zeroflush_csd PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}
       ${CMAKE_CURRENT_SOURCE_DIR}/include)
     if(EXISTS "${ZF_XRT_ROOT}/include")
-      target_include_directories(zf_csd_test${ARTIFACT_SUFFIX} PRIVATE
-        ${ZF_XRT_ROOT}/include)
+      target_include_directories(zeroflush_csd PRIVATE ${ZF_XRT_ROOT}/include)
     endif()
-    target_link_directories(zf_csd_test${ARTIFACT_SUFFIX} PRIVATE
-      ${ZF_XRT_ROOT}/lib)
-    target_link_libraries(zf_csd_test${ARTIFACT_SUFFIX}
+    target_link_directories(zeroflush_csd PRIVATE ${ZF_XRT_ROOT}/lib)
+    target_link_libraries(zeroflush_csd PRIVATE
       ${ROCKSDB_LIB} ${THIRDPARTY_LIBS} xilinxopencl pthread)
-    set_target_properties(zf_csd_test${ARTIFACT_SUFFIX} PROPERTIES
+    set_target_properties(zeroflush_csd PROPERTIES
       BUILD_RPATH "${ZF_XRT_ROOT}/lib"
       INSTALL_RPATH "${ZF_XRT_ROOT}/lib")
-    message(STATUS "zf_csd_test enabled (XRT at ${ZF_XRT_ROOT})")
+    add_executable(zf_csd_test${ARTIFACT_SUFFIX} tools/zf_csd_test.cc)
+    target_include_directories(zf_csd_test${ARTIFACT_SUFFIX} PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}
+      ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(zf_csd_test${ARTIFACT_SUFFIX}
+      ${ROCKSDB_LIB} ${THIRDPARTY_LIBS} zeroflush_csd pthread)
+    message(STATUS "zf_csd_test + libzeroflush_csd enabled (XRT at ${ZF_XRT_ROOT})")
   else()
     message(STATUS "zf_csd_test disabled (XRT lib not found at ${ZF_XRT_ROOT})")
   endif()

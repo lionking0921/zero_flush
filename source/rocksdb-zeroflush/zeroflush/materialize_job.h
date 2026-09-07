@@ -275,6 +275,28 @@ class ZfMaterializeJob {
       const std::vector<std::string>& keys,
       const std::vector<std::string>& values);
 
+  // 阶段 J：CSD-FPGA A∪B 真重写归并卸载（kMergeBase → kernel mode=2 裁剪档）。
+  // 入参 keys/values 已按 internal comparator 有序（aside_sorted，全版本封存代
+  // A 侧）；B 侧 = overlap_all（L1 existing + 批内前序，键序有序不重叠）+ 每
+  // 个 l0_overlap 各自成链（L0 文件可互相重叠，不可并入 overlap_all 链）。
+  // 语义 = 引擎 MaterializeMergePartition 的 host CompactionIterator（无快照、
+  // 非 bottommost）归并：每 user 键只留最新版，最新为删除则保留 tombstone。
+  // 资格链（任一失败 → csd_fallbacks++ 并返回 false = 回落原 host 归并）：
+  //   无活跃用户快照（job_context snapshot_seqs 空）→ A 界内（镜像 host 范围
+  //   断言，越界回落走 host 原 OOB/Corruption）→ BuildCsdSlotAFromSorted →
+  //   B 链可装（≤3 链）+ 逐 B 文件 conformance 扫描（每条 ik 恰 32B / value
+  //   ≤1024B / 类型 ∈ {Put,Delete}，杜绝设备静默错读）→ device mode=2 run →
+   //   ZfSeal 封口 → 引擎重开反读首尾键定 meta 边界 + 条目数 == pps[1] 复核。
+  // 输出入 outputs_（decision = kMergeBase，供 FinalizeLocked 批内链式替换）。
+  bool TryCsdMergeMaterialize(
+      uint32_t part_id, const std::vector<std::string>& keys,
+      const std::vector<std::string>& values, uint64_t min_seq,
+      const ROCKSDB_NAMESPACE::Slice& lo,
+      const ROCKSDB_NAMESPACE::Slice& hi,
+      const std::vector<ROCKSDB_NAMESPACE::FileMetaData*>& overlap_all,
+      const std::vector<ROCKSDB_NAMESPACE::FileMetaData*>& l0_overlap,
+      const ROCKSDB_NAMESPACE::Compaction* compaction);
+
   // 定层（须持 DB mutex）：base_level 直装或回落 L0（M3.2 范围，§3.2 流图）。
   // 可安装 ⟺ L0..base_level 均无文件与本文件 user key 范围重叠
   // （含本批次已放置文件，跨 epoch 的 ABA 防护）。

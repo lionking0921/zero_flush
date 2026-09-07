@@ -1,0 +1,138 @@
+== resume link start: 2026-09-07 16:49:34 CST ==
+Option Map File Used: '/tools/Xilinx/Vitis/2022.2/data/vitis/vpp/optMap.xml'
+
+****** v++ v2022.2 (64-bit)
+  **** SW Build 3671529 on 2022-10-13-17:52:11
+    ** Copyright 1986-2022 Xilinx, Inc. All Rights Reserved.
+
+INFO: [v++ 60-1306] Additional information associated with this v++ link can be found at:
+	Reports: /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/reports/link
+	Log files: /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/logs/link
+Running Dispatch Server on port: 45355
+INFO: [v++ 60-1548] Creating build summary session with primary output /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/build/hw/krnl_vadd.xclbin.link_summary, at Mon Sep  7 16:49:46 2026
+INFO: [v++ 60-1315] Creating rulecheck session with output '/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/reports/link/v++_link_krnl_vadd_guidance.html', at Mon Sep  7 16:49:46 2026
+INFO: [v++ 60-1321] The specified from_step 'vpl.impl.write_bitstream' is valid
+INFO: [v++ 60-895]   Target platform: /opt/xilinx/platforms/xilinx_u2_gen3x4_xdma_gc_2_202110_1/xilinx_u2_gen3x4_xdma_gc_2_202110_1.xpfm
+INFO: [v++ 60-1578]   This platform contains Xilinx Shell Archive '/opt/xilinx/platforms/xilinx_u2_gen3x4_xdma_gc_2_202110_1/hw/hw.xsa'
+INFO: [v++ 74-78] Compiler Version string: 2022.2
+INFO: [v++ 60-629] Linking for hardware target
+INFO: [v++ 60-423]   Target device: xilinx_u2_gen3x4_xdma_gc_2_202110_1
+INFO: [v++ 60-1326] Run 'run_link' is new, need to run from the first step 'system_link', ignoring --from_step option 'vpl'
+INFO: [v++ 60-1332] Run 'run_link' status: Not started
+INFO: [v++ 60-1443] [16:49:49] Run run_link: Step vpl: Started
+INFO: [v++ 60-1453] Command Line: vpl -t hw -f /opt/xilinx/platforms/xilinx_u2_gen3x4_xdma_gc_2_202110_1/xilinx_u2_gen3x4_xdma_gc_2_202110_1.xpfm --remote_ip_cache /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/.ipcache --output_dir /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/int --log_dir /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/logs/link --report_dir /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/reports/link --config /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/int/vplConfig.ini -k /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/int/kernel_info.dat --webtalk_flag Vitis --temp_dir /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link --no-info --iprepo /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/int/xo/ip_repo/xilinx_com_hls_krnl_vadd_1_0 --from_step impl.write_bitstream --messageDb /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/run_link/vpl.pb /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/int/dr.bd.tcl
+INFO: [v++ 60-1454] Run Directory: /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/run_link
+
+****** vpl v2022.2 (64-bit)
+  **** SW Build 3671529 on 2022-10-13-17:52:11
+    ** Copyright 1986-2022 Xilinx, Inc. All Rights Reserved.
+
+INFO: [VPL 60-839] Read in kernel information from file '/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/int/kernel_info.dat'.
+INFO: [VPL 74-78] Compiler Version string: 2022.2
+INFO: [VPL 60-423]   Target device: xilinx_u2_gen3x4_xdma_gc_2_202110_1
+INFO: [VPL 60-1321] The specified from_step 'impl.write_bitstream' is valid
+INFO: [VPL 60-1032] Extracting hardware platform to /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/vivado/vpl/.local/hw_platform
+INFO: [VPL 60-1323] Run 'vpl' is in FAIL state, reset the run from step 'impl' as specified by --from_step option
+[16:50:01] Run vpl: Step impl: Started
+Opening Vivado project.
+[16:58:58] Creating bitmap...
+[17:03:28] Writing bitstream ./level0_i_ulp_my_rm_partial.bit...
+[17:03:28] Finished 6th of 6 tasks (FPGA bitstream generation). Elapsed time: 00h 13m 38s 
+Check VPL, containing 0 checks, has run: 0 errors
+[17:03:32] Run vpl: Step impl: Completed
+[17:03:33] Run vpl: FINISHED. Run Status: impl Complete!
+INFO: [v++ 60-1441] [17:03:33] Run run_link: Step vpl: Completed
+Time (s): cpu = 00:00:08 ; elapsed = 00:13:44 . Memory (MB): peak = 452.453 ; gain = 0.000 ; free physical = 127354 ; free virtual = 154799
+INFO: [v++ 60-1443] [17:03:33] Run run_link: Step rtdgen: Started
+INFO: [v++ 60-1453] Command Line: rtdgen
+INFO: [v++ 60-1454] Run Directory: /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/run_link
+INFO: [v++ 60-991] clock name 'blp_s_aclk_kernel_ref_clk_00' (clock ID '0') is being mapped to clock name 'DATA_CLK' in the xclbin
+INFO: [v++ 60-991] clock name 'blp_s_aclk_kernel2_ref_clk_00' (clock ID '1') is being mapped to clock name 'KERNEL_CLK' in the xclbin
+INFO: [v++ 60-1230] The compiler selected the following frequencies for the runtime controllable kernel clock(s) and scalable system clock(s): Kernel (DATA) clock: blp_s_aclk_kernel_ref_clk_00 = 70, Kernel (KERNEL) clock: blp_s_aclk_kernel2_ref_clk_00 = 500
+INFO: [v++ 60-1453] Command Line: cf2sw -a /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/int/address_map.xml -sdsl /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/int/sdsl.dat -xclbin /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/int/xclbin_orig.xml -rtd /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/int/krnl_vadd.rtd -o /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/int/krnl_vadd.xml
+INFO: [v++ 60-1652] Cf2sw returned exit code: 0
+INFO: [v++ 60-1441] [17:03:36] Run run_link: Step rtdgen: Completed
+Time (s): cpu = 00:00:03 ; elapsed = 00:00:03 . Memory (MB): peak = 452.453 ; gain = 0.000 ; free physical = 128573 ; free virtual = 156018
+INFO: [v++ 60-1443] [17:03:36] Run run_link: Step xclbinutil: Started
+INFO: [v++ 60-1453] Command Line: xclbinutil --add-section BITSTREAM:RAW:/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/int/partial.bit --force --target hw --key-value SYS:dfx_enable:true --add-section :JSON:/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/int/krnl_vadd.rtd --append-section :JSON:/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/int/appendSection.rtd --add-section CLOCK_FREQ_TOPOLOGY:JSON:/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/int/krnl_vadd_xml.rtd --add-section BUILD_METADATA:JSON:/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/int/krnl_vadd_build.rtd --add-section EMBEDDED_METADATA:RAW:/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/int/krnl_vadd.xml --add-section SYSTEM_METADATA:RAW:/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/int/systemDiagramModelSlrBaseAddress.json --key-value SYS:PlatformVBNV:xilinx_u2_gen3x4_xdma_gc_2_202110_1 --output /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/build/hw/krnl_vadd.xclbin
+INFO: [v++ 60-1454] Run Directory: /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/run_link
+XRT Build Version: 2.14.354 (2022.2)
+       Build Date: 2022-10-08 09:49:58
+          Hash ID: 43926231f7183688add2dccfd391b36a1f000bea
+Creating a default 'in-memory' xclbin image.
+
+Section: 'BITSTREAM'(0) was successfully added.
+Size   : 28102508 bytes
+Format : RAW
+File   : '/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/int/partial.bit'
+
+Section: 'MEM_TOPOLOGY'(6) was successfully added.
+Format : JSON
+File   : 'mem_topology'
+
+Section: 'IP_LAYOUT'(8) was successfully added.
+Format : JSON
+File   : 'ip_layout'
+
+Section: 'CONNECTIVITY'(7) was successfully added.
+Format : JSON
+File   : 'connectivity'
+
+Section: 'CLOCK_FREQ_TOPOLOGY'(11) was successfully added.
+Size   : 274 bytes
+Format : JSON
+File   : '/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/int/krnl_vadd_xml.rtd'
+
+Section: 'BUILD_METADATA'(14) was successfully added.
+Size   : 3446 bytes
+Format : JSON
+File   : '/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/int/krnl_vadd_build.rtd'
+
+Section: 'EMBEDDED_METADATA'(2) was successfully added.
+Size   : 83416 bytes
+Format : RAW
+File   : '/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/int/krnl_vadd.xml'
+
+Section: 'SYSTEM_METADATA'(22) was successfully added.
+Size   : 1002 bytes
+Format : RAW
+File   : '/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/int/systemDiagramModelSlrBaseAddress.json'
+
+Section: 'PARTITION_METADATA'(20) was successfully appended to.
+Format : JSON
+File   : 'partition_metadata'
+
+Section: 'IP_LAYOUT'(8) was successfully appended to.
+Format : JSON
+File   : 'ip_layout'
+Successfully wrote (28201289 bytes) to the output file: /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/build/hw/krnl_vadd.xclbin
+Leaving xclbinutil.
+INFO: [v++ 60-1441] [17:03:36] Run run_link: Step xclbinutil: Completed
+Time (s): cpu = 00:00:00.16 ; elapsed = 00:00:00.26 . Memory (MB): peak = 452.453 ; gain = 0.000 ; free physical = 128545 ; free virtual = 156017
+INFO: [v++ 60-1443] [17:03:36] Run run_link: Step xclbinutilinfo: Started
+INFO: [v++ 60-1453] Command Line: xclbinutil --quiet --force --info /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/build/hw/krnl_vadd.xclbin.info --input /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/build/hw/krnl_vadd.xclbin
+INFO: [v++ 60-1454] Run Directory: /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/run_link
+INFO: [v++ 60-1441] [17:03:37] Run run_link: Step xclbinutilinfo: Completed
+Time (s): cpu = 00:00:00.37 ; elapsed = 00:00:00.44 . Memory (MB): peak = 452.453 ; gain = 0.000 ; free physical = 128547 ; free virtual = 156018
+INFO: [v++ 60-1443] [17:03:37] Run run_link: Step generate_sc_driver: Started
+INFO: [v++ 60-1453] Command Line: 
+INFO: [v++ 60-1454] Run Directory: /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/run_link
+INFO: [v++ 60-1441] [17:03:37] Run run_link: Step generate_sc_driver: Completed
+Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 452.453 ; gain = 0.000 ; free physical = 128547 ; free virtual = 156018
+Check POST-VPL, containing 1 checks, has run: 0 errors
+INFO: [v++ 60-244] Generating system estimate report...
+INFO: [v++ 60-1092] Generated system estimate report: /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/reports/link/system_estimate_krnl_vadd.xtxt
+INFO: [v++ 60-586] Created /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/build/hw/krnl_vadd.ltx
+INFO: [v++ 60-586] Created build/hw/krnl_vadd.xclbin
+INFO: [v++ 60-1307] Run completed. Additional information can be found in:
+	Guidance: /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/reports/link/v++_link_krnl_vadd_guidance.html
+	Timing Report: /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/reports/link/imp/impl_1_hw_bb_locked_timing_summary_routed.rpt
+	Vivado Log: /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/logs/link/vivado.log
+	Steps Log File: /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/logs/link/link.steps.log
+
+INFO: [v++ 60-2343] Use the vitis_analyzer tool to visualize and navigate the relevant reports. Run the following command. 
+    vitis_analyzer /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/build/hw/krnl_vadd.xclbin.link_summary 
+INFO: [v++ 60-791] Total elapsed time: 0h 14m 1s
+INFO: [v++ 60-1653] Closing dispatch client.
+EXIT=0
+== resume link done: 2026-09-07 17:03:37 CST rc=0 ==

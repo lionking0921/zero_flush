@@ -35,6 +35,19 @@ VPP   := v++
 # reference xclbin command line)
 KFLAGS := -t $(TARGET) --platform $(PLATFORM) --define KERNEL_NAME=$(KERNEL) --hls.clock 200000000:$(KERNEL)
 
+# link-stage kernel clock override (MHz), hw only.
+# The proven-routable reference xclbin (a69cf31 kernel = E-1, real-card validated
+# mode 0/1) was linked with the DEFAULT recipe below -- no --kernel_frequency, so the
+# U2 shell drives the kernel at its 300 MHz ref clock.  --hls.clock above only
+# constrains HLS synthesis, not the -l link clock.  The only later unroutable builds
+# (j2/j3/j4, route_design congestion 6-7) shared one delta: the encoder file-close was
+# moved into the unconditional loop body (4cc31bb).  Kernel reverted to a69cf31 layout
+# with the tail fix moved AFTER the loop (post-loop guarded close), so the first hw
+# attempt is the 300 MHz default again.  If it fails (congestion/timing), retry 200 MHz:
+#     make TARGET=hw KFREQ_MHZ=200 xclbin
+KFREQ_MHZ ?=
+LFREQ := $(if $(KFREQ_MHZ),--kernel_frequency $(KFREQ_MHZ),)
+
 .PHONY: all xclbin host run clean
 
 all: xclbin host
@@ -48,7 +61,7 @@ $(XO): $(KSRC) $(KINC)/krnl_host.h | $(BUILD)
 
 $(XCLBIN): $(XO)
 	source $(VITIS_SETTINGS); set -o pipefail; \
-	v++ $(KFLAGS) -l $(XO) -o $@ 2>&1 | tee -a $(LOG)
+	v++ $(KFLAGS) $(LFREQ) -l $(XO) -o $@ 2>&1 | tee -a $(LOG)
 	@echo "== $(XCLBIN) built =="
 
 host: $(HOSTBIN)
