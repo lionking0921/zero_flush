@@ -223,7 +223,7 @@ RocksDB CompactionIterator 归并。`mode=2` 与 M3 `mode=0` 在 encoder 侧同�
 | host 回落 merge | ✅ PASS（3×） | `files==0 ∧ fallbacks>0 ∧ merge_files==0`；`base_merge>0` |
 | sw_emu direct | ✅ PASS | `files=216 attempts=216 fallbacks=0`；Get/full-scan/reopen 全等 |
 | sw_emu merge | ✅ PASS（3×） | `csd_merge_files>0`；host==csd==oracle；reopen CRC scan==oracle |
-| hw direct / merge | 进行中 | 等 j5 xclbin 产出后上真 U2 卡验证 |
+| hw direct / merge | ✅ PASS（2026-09-07 真 U2 卡） | direct `files=216 attempts=216 fallbacks=0`、full-scan/reopen CRC/Get 全等；merge `files=54/53 merge_files=32/31 fallbacks=0`、reopen CRC scan==oracle（2× 复现稳定） |
 
 ---
 
@@ -283,8 +283,13 @@ RocksDB CompactionIterator 归并。`mode=2` 与 M3 `mode=0` 在 encoder 侧同�
 - hw：j2 300MHz / j3 200MHz / j4 200MHz+SpreadLogic_high **三连 route_design 失败**（congestion 6-7，
   密度驱动非时序；j4 默认 run + 策略 run 双 congestion 6）。根因强相关 = 4cc31bb encoder「文件收尾
   重构到无条件循环体层」（修 mode=2 流尾抑制 bug），对比 git 内可布的真卡验证 xclbin（a69cf31，
-  已恢复至 `krnl_vadd.E1_a69cf31_validated.xclbin`）。mode=2 bitstream 待 kernel 侧重构改法 + 用户裁。
-  无 bitstream → hw 真卡矩阵未跑，**阻塞中**。
+  已恢复至 `krnl_vadd.E1_a69cf31_validated.xclbin`）。j5 恢复可布布局（guard 尾文件 close）后 route 通、
+  WNS 边缘负（-0.277ns 壳层 250MHz 时钟），按惯例不限暂停 → 门禁放行产出 28,201,289B
+  `krnl_vadd.xclbin`，裸 host（main_zf RunAbDevice）8/8 真卡验证 PASS。
+  **生产引擎路径真卡验证（2026-09-07）**：`zf_csd_test --xclbin <hw> --device 0`（直装，引擎
+  materialize seam mode=1）`files=216 attempts=216 fallbacks=0`、full-scan/reopen CRC/Get 全等 oracle；
+  `--merge --xclbin <hw>`（kMergeBase seam mode=2）`files=54/53 merge_files=32/31 fallbacks=0`
+  （2× 稳定），reopen CRC scan==oracle。**阶段 J hw 真卡矩阵打通，不再阻塞。**
 
 ## 边界
 
