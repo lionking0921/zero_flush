@@ -1,0 +1,104 @@
+{
+  "log": "groupA2_cpu_10m.log",
+  "props": {
+    "zf.epochs_sealed": 676,
+    "zf.epochs_materialized": 674,
+    "zf.epochs_reclaimed": 580,
+    "zf.live_wal_bytes": 122297084,
+    "zf.sealed_wal_bytes": 31746304,
+    "zf.materialize_micros": 20129570,
+    "zf.materialize_sort_micros": 0,
+    "zf.sealed_read_count": 0,
+    "zf.sealed_cache_miss": 0,
+    "zf.recovery_count": 0,
+    "zf.partition_skew": 1.9922,
+    "zf.install_direct_base": 1,
+    "zf.install_fallback_l0": 2699,
+    "zf.base_merge_count": 0,
+    "zf.base_merge_rewritten_bytes": 0,
+    "zf.skip_count": 0,
+    "zf.csd_files": 0,
+    "zf.csd_attempts": 0,
+    "zf.csd_fallbacks": 0,
+    "zf.csd_merge_files": 0
+  },
+  "progress_rows": [
+    {
+      "done": 1000001.0,
+      "seg": 1000001.0,
+      "wall": 2.95362,
+      "us": 2.953617,
+      "ops": 338568.0
+    },
+    {
+      "done": 2000007.0,
+      "seg": 1000006.0,
+      "wall": 3.215812,
+      "us": 3.215793,
+      "ops": 310965.0
+    },
+    {
+      "done": 3000002.0,
+      "seg": 999995.0,
+      "wall": 3.345235,
+      "us": 3.345252,
+      "ops": 298931.0
+    },
+    {
+      "done": 4000002.0,
+      "seg": 1000000.0,
+      "wall": 3.478217,
+      "us": 3.478217,
+      "ops": 287504.0
+    },
+    {
+      "done": 5000001.0,
+      "seg": 999999.0,
+      "wall": 3.34563,
+      "us": 3.345633,
+      "ops": 298897.0
+    },
+    {
+      "done": 6000000.0,
+      "seg": 999999.0,
+      "wall": 3.498816,
+      "us": 3.498819,
+      "ops": 285811.0
+    },
+    {
+      "done": 7000003.0,
+      "seg": 1000003.0,
+      "wall": 3.219902,
+      "us": 3.219892,
+      "ops": 310569.0
+    },
+    {
+      "done": 8000001.0,
+      "seg": 999998.0,
+      "wall": 3.984252,
+      "us": 3.98426,
+      "ops": 250988.0
+    },
+    {
+      "done": 9000000.0,
+      "seg": 999999.0,
+      "wall": 3.377989,
+      "us": 3.377992,
+      "ops": 296034.0
+    },
+    {
+      "done": 10000000.0,
+      "seg": 1000000.0,
+      "wall": 4.27022,
+      "us": 4.27022,
+      "ops": 234180.0
+    }
+  ],
+  "fillrandom": {
+    "bench": "fillrandom",
+    "micros_per_op": 55.489,
+    "ops_per_sec": 288272.0,
+    "seconds": 34.689,
+    "operations": "10000000"
+  }
+}

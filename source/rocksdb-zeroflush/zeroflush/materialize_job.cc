@@ -1262,9 +1262,16 @@ bool ZfMaterializeJob::TryCsdDirectMaterialize(
   const uint64_t staged_size = slot.file_size;
   ZfCsdSlot slots[4];  // slots[1..3] 空 = 无 B 侧
   slots[0] = std::move(slot);
-  // 输出预算：保守上限（A-only 下 data ≈ 输入帧区量级）。超预算 → 设备 run
-  // 失败 → 回落 host；正确性不依赖预算精度。
-  const uint64_t sst_bytes = 2 * staged_size + 64 * 1024;
+  // 输出预算：kernel 把 sst_bytes 当总预算并在内部按 MAX_OUTPUT_FILE_NUM(4)
+  // 等分出每文件配额 file_limit=round4k(sst_bytes/4)（krnl_vadd.cpp RunAb 尾），
+  // encoder 一旦累计数据 > file_limit 即滚到下一输出文件 → file_num>1 → 本 seam
+  // 单文件契约判拒回落 host。A-only 下全量编码输出 ≈ staged 量级，故预算必须
+  // ≥ 4×staged 才能让整份输出留在文件 0（第 4 份配额 ≈ staged）。取 8×staged
+  // ⇒ 单文件配额 ≈ 2×staged，留约 2× 裕量抗编码开销波动。读回为 PPS 前缀直读，
+  // 多余预算只增输出缓冲容量、不增 DMA；kernel 依编码实际写、不越界，正确性
+  // 不依赖预算精度。历史 2×staged ⇒ 配额≈staged/2 < 输出 ⇒ 恒 2 文件（524/524
+  // 全回落实证，2026-09-07 100M bench 前修复）。
+  const uint64_t sst_bytes = 8 * staged_size + 64 * 1024;
   const uint64_t idx_bytes = sst_bytes / 4 + 1024 * 1024;
   ZfCsdOutput out;
   ROCKSDB_NAMESPACE::Status rs =

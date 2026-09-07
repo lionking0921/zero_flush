@@ -41,6 +41,7 @@
 
 #include "db/db_impl/db_impl.h"
 #include "db/malloc_stats.h"
+#include "zeroflush/csd_backend.h"
 #include "db/version_set.h"
 #include "monitoring/histogram.h"
 #include "monitoring/statistics_impl.h"
@@ -883,6 +884,20 @@ DEFINE_int32(zf_max_batch_partitions, 0,
 DEFINE_double(zf_merge_ratio, 0.25,
               "ZeroFlush base-merge trigger ratio: sealed bytes / base-level "
               "overlap bytes must exceed this to fuse (else fall back to L0).");
+DEFINE_bool(zf_csd, false,
+            "ZeroFlush CSD-FPGA offload: set ZeroFlushOptions.csd_materialize "
+            "= true (device session auto-enabled via libzeroflush_csd weak "
+            "plugin; falls back to host materialize when xclbin/device "
+            "unavailable). Only used when --zeroflush is true.");
+DEFINE_string(zf_csd_xclbin, "",
+              "ZeroFlush CSD xclbin path (e.g. a hw krnl_vadd.xclbin). Only "
+              "used when --zeroflush && --zf_csd.");
+DEFINE_int32(zf_csd_device, 0,
+             "ZeroFlush CSD device index (cl device idx). Only used when "
+             "--zeroflush && --zf_csd.");
+DEFINE_bool(zf_props, true,
+            "Print ZeroFlush engine properties (rocksdb.zeroflush.*, incl. "
+            "csd_*) after each benchmark while the session is still open.");
 
 DEFINE_bool(use_existing_keys, false,
             "If true, uses existing keys in the DB, "
@@ -3561,6 +3576,15 @@ class Benchmark {
 
   ~Benchmark() {
     DeleteDBs();
+    // F-3/阶段 J：DB 全部关闭、无后台物化线程在途后，显式释放进程级 CSD
+    // 设备会话（OpenCL/XRT 对象须在 main 作用域析构 —— ~Benchmark 在
+    // db_bench_tool() 栈帧内、main 返回前运行；若留到进程 atexit，
+    // clReleaseKernel 会在 XRT context_mgr 拆除后触发 SEGV，真卡实测）。
+    // CSD 未启用时为空操作。关闭期残余 epoch 物化已回落 host（会话被锁存为
+    // null 后不再重建），不影响会话内已打印的 csd_* 计数。
+    if (FLAGS_zeroflush) {
+      zeroflush::ShutdownZeroFlushCsdSession();
+    }
     if (cache_.get() != nullptr) {
       // Clear cache reference first
       open_options_.write_buffer_manager.reset();
@@ -4157,6 +4181,24 @@ class Benchmark {
                   FLAGS_block_cache_trace_file.c_str());
         }
 
+        // ZF 卸载 bench 分点：每 total/10 全局写操作（100M fillrandom → 10 行）
+        // 打印一次跨线程吞吐。total 按 per-thread 配额 × 线程数估算，与实际
+        // 写计数一致（M3 已证 writes 为每线程配额）。非 ZF / 非 fill 置 0 关闭。
+        if (FLAGS_zeroflush && name.rfind("fill", 0) == 0) {
+          const int64_t per_thread_ops = (writes_ > 0 ? writes_ : num_);
+          const int64_t total_expected = per_thread_ops * num_threads;
+          interval_every_ =
+              total_expected > 0
+                  ? (static_cast<uint64_t>(total_expected) + 9) / 10
+                  : 0;
+          interval_ops_done_.store(0, std::memory_order_relaxed);
+          interval_prev_at_ = 0;
+          interval_prev_micros_ = FLAGS_env->NowMicros();
+          interval_next_at_ = interval_every_;
+        } else {
+          interval_every_ = 0;
+        }
+
         if (num_warmup > 0) {
           printf("Warming up benchmark by running %d times\n", num_warmup);
         }
@@ -4213,7 +4255,7 @@ class Benchmark {
     if (FLAGS_statistics) {
       fprintf(stdout, "STATISTICS:\n%s\n", dbstats->ToString().c_str());
     }
-    if (FLAGS_zeroflush && db_.db != nullptr) {
+    if (FLAGS_zeroflush && FLAGS_zf_props && db_.db != nullptr) {
       static const char* zf_props[] = {
           "epochs_sealed",
           "epochs_materialized",
@@ -4230,7 +4272,12 @@ class Benchmark {
           "install_fallback_l0",
           "base_merge_count",
           "base_merge_rewritten_bytes",
-          "skip_count"};
+          "skip_count",
+          // F-3/阶段 J：CSD 卸载计数（会话内累积；无设备/回落恒 0）。
+          "csd_files",
+          "csd_attempts",
+          "csd_fallbacks",
+          "csd_merge_files"};
       fprintf(stdout, "ZEROFLUSH PROPERTIES:\n");
       for (const char* p : zf_props) {
         std::string v;
@@ -4256,6 +4303,51 @@ class Benchmark {
   std::unique_ptr<port::Thread> secondary_update_thread_;
   std::atomic<int> secondary_update_stopped_{0};
   uint64_t secondary_db_updates_ = 0;
+  // ---- ZF 卸载 bench 分点上报：每 ~total/10 全局写操作打一行吞吐 ----
+  // 100M fillrandom（16 线程 × 6.25M 配额）→ 恰好 10 行。DoWrite 每完成一个
+  // batch 做一次 relaxed 原子累加，跨边界线程在锁内重载当前全局计数并打印，
+  // 保证 10 行各自对应真实的时间窗（无并发批量的时间戳错位）。
+  std::atomic<uint64_t> interval_ops_done_{0};
+  uint64_t interval_every_ = 0;  // 0 = 关闭（非 ZF 零开销）
+  uint64_t interval_next_at_ = 0;
+  uint64_t interval_prev_at_ = 0;
+  uint64_t interval_prev_micros_ = 0;
+  port::Mutex interval_mu_;
+
+  // 工作线程每跨过 total/10 边界即打印一行累积写吞吐（ops/sec + us/op + wall）。
+  // n = 本 batch 实际写入的操作数（≥1）。非边界时仅一次 relaxed fetch_add + 一次
+  // 近似读，无锁；边界时（整个 run 仅 ~10 次）加锁串行打印。
+  void ReportWriteIntervalOps(uint64_t n) {
+    if (interval_every_ == 0 || n == 0) {
+      return;
+    }
+    const uint64_t done =
+        interval_ops_done_.fetch_add(n, std::memory_order_relaxed) + n;
+    if (done < interval_next_at_) {
+      return;  // 未跨边界（近似读，无需锁）
+    }
+    MutexLock l(&interval_mu_);
+    uint64_t ndone = interval_ops_done_.load(std::memory_order_relaxed);
+    while (interval_next_at_ > 0 && ndone >= interval_next_at_) {
+      const uint64_t now = FLAGS_env->NowMicros();
+      const uint64_t seg_ops = ndone - interval_prev_at_;
+      if (seg_ops == 0) {
+        break;
+      }
+      const double wall_us = static_cast<double>(now - interval_prev_micros_);
+      const double us_per_op = wall_us / seg_ops;
+      fprintf(stdout,
+              "ZFPROGRESS writes_done=%" PRIu64 " seg_ops=%" PRIu64
+              " wall_sec=%.6f us_per_op=%.6f ops_per_sec=%.0f\n",
+              ndone, seg_ops, wall_us / 1e6, us_per_op,
+              us_per_op > 0 ? 1e6 / us_per_op : 0.0);
+      fflush(stdout);
+      interval_prev_at_ = ndone;
+      interval_prev_micros_ = now;
+      interval_next_at_ += interval_every_;
+      ndone = interval_ops_done_.load(std::memory_order_relaxed);
+    }
+  }
   struct ThreadArg {
     Benchmark* bm;
     SharedState* shared;
@@ -5551,6 +5643,18 @@ class Benchmark {
       if (FLAGS_zf_merge_ratio > 0) {
         zfo.base_merge_min_ratio = FLAGS_zf_merge_ratio;
       }
+      if (FLAGS_zf_csd) {
+        // CSD-FPGA 物化卸载：显式注册 XRT/OpenCL 设备会话工厂。相比依赖
+        // weak→strong 插件自动使能，这里直接强引用 libzeroflush_csd.so 导出
+        // 符号 —— 否则 --as-needed 下链接器看到 db_bench 无任何直接符号引用会
+        // 丢弃该库（无 DT_NEEDED）→ 插件永不加载 → 卸载静默回落 host。引擎
+        // lib 仍 XRT-free；xclbin/设备不可用 → 会话工厂返回空 → 物化回落 host
+        // （csd_fallbacks 计数），与 csd off 同路径。
+        zfo.csd_materialize = true;
+        zfo.csd_xclbin = FLAGS_zf_csd_xclbin;
+        zfo.csd_device = static_cast<uint32_t>(FLAGS_zf_csd_device);
+        zeroflush::RegisterZeroFlushCsdOpenclSessionFactory();
+      }
       s = zeroflush::Open(options, zfo, db_name, &db->db_owner);
       if (s.ok()) {
         db->db = db->db_owner.get();
@@ -6247,6 +6351,11 @@ class Benchmark {
       }
       thread->stats.FinishedOps(db_with_cfh, db_with_cfh->db,
                                 entries_per_batch_, kWrite);
+      // ZF 分点上报：每个 batch 一次 relaxed 原子累加（本 batch 实际写操作数）。
+      // interval_every_==0 时仅一次原子无锁返回，开销可忽略。
+      if (interval_every_ != 0) {
+        ReportWriteIntervalOps(static_cast<uint64_t>(entries_per_batch_));
+      }
       if (FLAGS_sine_write_rate) {
         uint64_t now = FLAGS_env->NowMicros();
 

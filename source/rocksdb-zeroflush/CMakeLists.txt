@@ -1753,7 +1753,11 @@ if(WITH_BENCHMARK_TOOLS)
       ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_link_libraries(zf_csd_test${ARTIFACT_SUFFIX}
       ${ROCKSDB_LIB} ${THIRDPARTY_LIBS} zeroflush_csd pthread)
-    message(STATUS "zf_csd_test + libzeroflush_csd enabled (XRT at ${ZF_XRT_ROOT})")
+    # db_bench：链 CSD 插件以便 --zeroflush --zf_csd 真卡卸载（weak→strong 自动
+    # 注册）；不设 --zf_csd 时行为不变。XRT-free 构建路径下不执行本分支。
+    target_link_libraries(db_bench${ARTIFACT_SUFFIX}
+      ${ROCKSDB_LIB} ${THIRDPARTY_LIBS} zeroflush_csd pthread)
+    message(STATUS "zf_csd_test + libzeroflush_csd + db_bench enabled (XRT at ${ZF_XRT_ROOT})")
   else()
     message(STATUS "zf_csd_test disabled (XRT lib not found at ${ZF_XRT_ROOT})")
   endif()
