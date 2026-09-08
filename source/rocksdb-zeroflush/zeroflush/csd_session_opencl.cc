@@ -25,8 +25,10 @@
 #define CL_TARGET_OPENCL_VERSION 120
 #include <CL/cl2.hpp>
 
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <memory>
@@ -49,6 +51,16 @@ constexpr uint32_t kPpsBufWords = 2048;   // pps_dev 缓冲（main_zf 同量）
 static_assert(kPpsWords == 512, "PPS region must match kernel PPS_KERNEL_SIZE");
 
 #define CSD_ALIGN_TO_4K(x) (((x) + 4095) & ~4095ULL)
+
+// ---- 第 0 步埋表：RunAb 分段计时（环境变量 ZF_CSD_PROFILE=1 开启；缺省关，
+// ---- 热路径与旧代码逐字节等价）。NowUs 仅 profile 分支调用。 ----
+inline uint64_t ZfNowUs() {
+  return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                                   std::chrono::steady_clock::now()
+                                       .time_since_epoch())
+                                   .count());
+}
+inline bool ZfProfileEnabled() { return std::getenv("ZF_CSD_PROFILE") != nullptr; }
 
 // ---- OpenCL 上下文：device/kernel 软失败版（main_zf OcCtx::Make 不 exit）----
 struct OcCtx {
@@ -84,7 +96,11 @@ struct OcCtx {
     c.dev = device;
     c.ctx = cl::Context(device, nullptr, nullptr, nullptr, &err);
     if (err != CL_SUCCESS) return false;
-    c.q = cl::CommandQueue(c.ctx, device, 0, &err);
+    // profile 模式给队列开 CL_QUEUE_PROFILING_ENABLE，才能从 kernel event 读到
+    // 设备侧真实起止（= kernel 纯算时间，排除 host 启动/排队）。缺省属性 0。
+    const cl_command_queue_properties qprop =
+        ZfProfileEnabled() ? CL_QUEUE_PROFILING_ENABLE : 0;
+    c.q = cl::CommandQueue(c.ctx, device, qprop, &err);
     if (err != CL_SUCCESS) return false;
     std::ifstream bf(xclbin, std::ifstream::binary);
     if (!bf) {
@@ -146,7 +162,9 @@ bool MapRead(OcCtx& c, cl::Buffer& b, size_t total, void* dst) {
 // ---- 会话实现（一次 run = 一次 enqueueTask；OcCtx 建好即设备可用）----
 class ZfCsdSessionOpencl final : public ZfCsdSession {
  public:
-  explicit ZfCsdSessionOpencl(OcCtx&& c) : c_(std::move(c)) {}
+  explicit ZfCsdSessionOpencl(OcCtx&& c) : c_(std::move(c)) {
+    prof_ = ZfProfileEnabled();
+  }
 
   bool Available() const override { return true; }  // 建出即探测成功
 
@@ -160,7 +178,13 @@ class ZfCsdSessionOpencl final : public ZfCsdSession {
     if (out == nullptr) {
       return ROCKSDB_NAMESPACE::Status::InvalidArgument("null csd output");
     }
+    // ---- 第 0 步埋表：分段计时（prof_ 缺省关；关时 t* 恒 0，走原始快路径）----
+    uint64_t t0 = 0, t1 = 0, t2 = 0, t3 = 0, t4 = 0, t5 = 0, t6 = 0;
+    uint64_t kern_us = 0;  // 设备侧 kernel 纯算（event 起止；enq_fin 段内含启动/收尾）
+    if (prof_) t0 = ZfNowUs();
+
     const uint32_t nslots = CountSlots(slots);
+    uint64_t staged_bytes = 0;  // 输入字节合计（含空口 0）
     // ---- 输入口缓冲（4K 对齐；空口 = 全零 4KB，镜像 main_zf）----
     std::vector<cl::Buffer> inbuf;
     uint64_t wal_bytes[4] = {0, 0, 0, 0};
@@ -174,6 +198,7 @@ class ZfCsdSessionOpencl final : public ZfCsdSession {
       }
       const std::vector<uint8_t>& src =
           (p < nslots) ? slots[p].bytes : kEmptyBytes();
+      staged_bytes += src.size();
       const size_t cap = std::max<size_t>(CSD_ALIGN_TO_4K(src.size()), 4096);
       bool ok = true;
       cl::Buffer b = MakeBuf(c_, cap, &ok);
@@ -185,6 +210,7 @@ class ZfCsdSessionOpencl final : public ZfCsdSession {
       }
       inbuf.push_back(b);
     }
+    if (prof_) t1 = ZfNowUs();
     // ---- 输出预算缓冲：容量 ≥ 预算（写满预算前 kernel 必须在界内）----
     const uint64_t sst_cap = CSD_ALIGN_TO_4K(sst_bytes);
     const uint64_t idx_cap = CSD_ALIGN_TO_4K(idx_bytes);
@@ -214,18 +240,34 @@ class ZfCsdSessionOpencl final : public ZfCsdSession {
                  sizeof(host_data))) {
       return ROCKSDB_NAMESPACE::Status::IOError("csd host-buffer map");
     }
+    if (prof_) t2 = ZfNowUs();
 
     for (uint32_t p = 0; p < 4; ++p) c_.krn.setArg(int(p), inbuf[p]);
     c_.krn.setArg(4, host_dev);
     c_.krn.setArg(5, sst_dev);
     c_.krn.setArg(6, idx_dev);
     c_.krn.setArg(7, pps_dev);
-    cl_int err = c_.q.enqueueTask(c_.krn, nullptr, nullptr);
-    if (err == CL_SUCCESS) err = c_.q.finish();
+    cl_int err;
+    if (prof_) {
+      cl::Event ev;
+      err = c_.q.enqueueTask(c_.krn, nullptr, &ev);
+      if (err == CL_SUCCESS) err = c_.q.finish();
+      if (err == CL_SUCCESS) {
+        cl_ulong st = 0, en = 0;
+        if (ev.getProfilingInfo(CL_PROFILING_COMMAND_START, &st) == CL_SUCCESS &&
+            ev.getProfilingInfo(CL_PROFILING_COMMAND_END, &en) == CL_SUCCESS) {
+          kern_us = static_cast<uint64_t>((en - st) / 1000);
+        }
+      }
+    } else {
+      err = c_.q.enqueueTask(c_.krn, nullptr, nullptr);
+      if (err == CL_SUCCESS) err = c_.q.finish();
+    }
     if (err != CL_SUCCESS) {
       fprintf(stderr, "[ZF csd] enqueueTask err %d\n", err);
       return ROCKSDB_NAMESPACE::Status::IOError("csd kernel task failed");
     }
+    if (prof_) t3 = ZfNowUs();
 
     std::vector<uint64_t> meta(kPpsBufWords);
     if (!MapRead(c_, pps_dev, sizeof(uint64_t) * kPpsBufWords, meta.data())) {
@@ -235,6 +277,7 @@ class ZfCsdSessionOpencl final : public ZfCsdSession {
     const uint64_t top_idx = meta[kPpsWords + kMaxOutFiles];     // out[516]
     const uint64_t file_num =
         meta[kPpsWords + 2 * kMaxOutFiles];                       // out[520]
+    if (prof_) t4 = ZfNowUs();
     std::vector<uint8_t> data_b(static_cast<size_t>(top_sst));
     std::vector<uint8_t> idx_b(static_cast<size_t>(top_idx));
     if (top_sst && !MapRead(c_, sst_dev, static_cast<size_t>(top_sst),
@@ -245,14 +288,55 @@ class ZfCsdSessionOpencl final : public ZfCsdSession {
                             idx_b.data())) {
       return ROCKSDB_NAMESPACE::Status::IOError("csd index readback");
     }
+    if (prof_) t5 = ZfNowUs();
     std::memcpy(out->pps, meta.data(), sizeof(uint64_t) * kPpsWords);
     out->file_num = file_num;
     out->data = std::move(data_b);
     out->index = std::move(idx_b);
+    if (prof_) {
+      t6 = ZfNowUs();
+      uint64_t d[7] = {t1 - t0, t2 - t1, t3 - t2, t4 - t3, t5 - t4,
+                       t6 - t5, t6 - t0};
+      EmitProfile(d, kern_us, kv_sum, staged_bytes, top_sst, top_idx);
+    }
     return ROCKSDB_NAMESPACE::Status::OK();
   }
 
  private:
+  // 分段含义（d 按下标）：0=in-buf 现建+map(4 口)、1=out-buf 现建+host map、
+  // 2=setArg+enqueue+finish(含 kernel)、3=pps 读回、4=data+idx 读回、
+  // 5=收尾 memcpy、6=tot。kern_us 为设备侧 kernel 纯算（event 起止）。
+  void EmitProfile(uint64_t d[7], uint64_t kern_us, uint64_t kv_sum,
+                   uint64_t staged_bytes, uint64_t top_sst, uint64_t top_idx) {
+    for (int i = 0; i < 7; ++i) sum_[i] += d[i];
+    kern_sum_ += kern_us;
+    ++run_cnt_;
+    fprintf(stderr,
+            "[ZF csd] prof run=%llu kv=%llu in=%lluB sst=%lluB idx=%lluB"
+            " | tot=%llu inbuf=%llu outbuf=%llu enqfin=%llu pps_r=%llu"
+            " datar=%llu final=%llu | kernel_ev=%lluus\n",
+            (unsigned long long)run_cnt_, (unsigned long long)kv_sum,
+            (unsigned long long)staged_bytes, (unsigned long long)top_sst,
+            (unsigned long long)top_idx, (unsigned long long)d[6],
+            (unsigned long long)d[0], (unsigned long long)d[1],
+            (unsigned long long)d[2], (unsigned long long)d[3],
+            (unsigned long long)d[4], (unsigned long long)d[5],
+            (unsigned long long)kern_us);
+    if (run_cnt_ % 25 == 0) {  // 每 25 run 打一次累计均值，方便长跑读数
+      fprintf(stderr,
+              "[ZF csd] prof SUM n=%llu | avg_tot=%llu inbuf=%llu outbuf=%llu"
+              " enqfin=%llu pps_r=%llu datar=%llu final=%llu kernel_ev=%llu\n",
+              (unsigned long long)run_cnt_,
+              (unsigned long long)(sum_[6] / run_cnt_),
+              (unsigned long long)(sum_[0] / run_cnt_),
+              (unsigned long long)(sum_[1] / run_cnt_),
+              (unsigned long long)(sum_[2] / run_cnt_),
+              (unsigned long long)(sum_[3] / run_cnt_),
+              (unsigned long long)(sum_[4] / run_cnt_),
+              (unsigned long long)(sum_[5] / run_cnt_),
+              (unsigned long long)(kern_sum_ / run_cnt_));
+    }
+  }
   static uint32_t CountSlots(const ZfCsdSlot slots[4]) {
     for (uint32_t p = 0; p < 4; ++p) {
       if (slots[p].bytes.empty()) return p;  // 首个空口截断（编排点保证紧凑）
@@ -265,6 +349,10 @@ class ZfCsdSessionOpencl final : public ZfCsdSession {
   }
   OcCtx c_;
   std::mutex run_mu_;  // 单内核实例：串行化 device run
+  bool prof_ = false;
+  uint64_t sum_[7] = {0, 0, 0, 0, 0, 0, 0};  // d[0..6] 累计（run_mu_ 下，无需原子）
+  uint64_t kern_sum_ = 0;                    // kernel_ev 累计
+  uint64_t run_cnt_ = 0;                     // 成功 run 计数
 };
 
 }  // namespace

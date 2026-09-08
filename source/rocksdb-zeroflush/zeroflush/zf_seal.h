@@ -8,8 +8,9 @@
 //   - properties 内容 = "引擎 BlockBasedTableBuilder 在 WritePropertiesBlock()
 //     时点会写出的完整 TableProperties"，由 (DB 选项 + ZfSealManifest) 装配，
 //     装配规则逐字段镜像 block_based_table_builder.cc 的 ctor + Add() + Finish()；
-//   - 目前仅支持 §14.6 锁定档位：format_version == 2、checksum = kCRC32c、
-//     index_type = kBinarySearch、kNoCompression、无 filter / prefix / merge /
+//   - 目前仅支持 §14.6 锁定档位：format_version == 2、checksum = kNoChecksum
+//     （CSD 档位，checksum 字段恒 0，对齐参考 CoKV kernel）或 kCRC32c、index_type
+//     = kBinarySearch、kNoCompression、无 filter / prefix / merge /
 //     显式 compression-manager / 外部 property collector。其余配置返回
 //     Status::InvalidArgument，不偷偷降级。
 //

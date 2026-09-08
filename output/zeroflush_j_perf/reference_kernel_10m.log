@@ -1,0 +1,22 @@
+=== reference kernel 10M bench log ===
+cmd: /tmp/zf_bench --xclbin /home/embedded-415/wjd/ZeroFlush/zero_flush/reference/CoKVKey24Value1024_kernel/compaction_k32v1024_20250825.xclbin --device 0 --gen-total 10000000 --launch 800000
+date: 2026-09-09
+launch    entries     in_bytes     gen_ms  kernel_ms    wall_ms  ofile   out_ent ok
+0          800000    855398260      489.2    2288.00     3892.0      4    800000 OK
+1          800000    855398260      521.1    2287.85     4158.9      4    800000 OK
+2          800000    855398260      506.8    2287.87     4098.5      4    800000 OK
+3          800000    855398260      485.7    2287.98     4101.2      4    800000 OK
+4          800000    855398260      486.7    2287.90     4055.9      4    800000 OK
+5          800000    855398260      484.0    2287.89     4139.7      4    800000 OK
+6          800000    855398260      492.4    2287.83     4104.1      4    800000 OK
+7          800000    855398260      486.0    2287.59     4084.2      4    800000 OK
+8          800000    855398260      501.6    2287.68     4078.6      4    800000 OK
+9          800000    855398260      484.2    2287.70     4085.0      4    800000 OK
+10         800000    855398260      519.6    2287.82     4157.8      4    800000 OK
+11         800000    855398260      486.5    2287.86     4090.6      4    800000 OK
+12         400000    427698260      243.4    1144.08     2214.3      4    400000 OK
+
+AGGREGATE  entries=10000000 in_bytes=10692477380 gen_s=6.187 io_s=10.188 kernel_s=28.598 wall_s=51.261
+  kernel throughput: 349674.1 ops/s   373.89 MB/s  (28.598 s total kernel)
+  end-to-end       : 195080.6 ops/s   208.59 MB/s  (51.261 s total wall incl host gen/io)
+RESULT: PASS (all launches out_entries==in)

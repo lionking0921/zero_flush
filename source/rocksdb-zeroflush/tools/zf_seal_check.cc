@@ -1,13 +1,13 @@
 // zf_seal_check.cc —— ZeroFlush FPGA aux-sort 内核产物 封口 + 引擎直读对拍
 //
-// (里程碑 3 阶段 D/E) 引擎树内小工具：消费内核/CPU-sim dump 的 "前缀"
-//（[PPS+data+index]，format_version=2 / kCRC32c / kBinarySearch，data/index 每块
-// 5B trailer 带 masked crc32c），用 ZfSealManifest + ZfSeal 封成完整 SST
-//（追写 [properties][metaindex][footer]），再经引擎自身 SstFileReader / TableReader
-// 字节直读回放：全键（含删除 tombstone、含 8B seq/type 尾）逐条以
-// `hex(32B 内部键)\t hex(值)` 打印到 stdout，供外部与 CPU-sim 的 .expect 对拍；
-// 校验档位即 §14.6 锁档。引擎 TableReader 逐块强校验 masked crc32c —— crc/格式
-// 任一字节不对会在 Open/Iterator 期以 Corruption 暴露。
+// (里程碑 3→kNoChecksum) 引擎树内小工具：消费内核/CPU-sim dump 的 "前缀"
+//（[PPS+data+index]，format_version=2 / kNoChecksum / kBinarySearch，data/index 每块
+// 5B trailer checksum 字段恒 0，对齐参考 CoKV），用 ZfSealManifest + ZfSeal 封成完整
+// SST（追写 [properties][metaindex][footer]，同 kNoChecksum），再经引擎自身
+// SstFileReader / TableReader 字节直读回放：全键（含删除 tombstone、含 8B seq/type 尾）
+// 逐条以 `hex(32B 内部键)\t hex(值)` 打印到 stdout，供外部与 CPU-sim 的 .expect 对拍；
+// 校验档位即 §14.6 解锁档位。kNoChecksum 下 reader 跳过逐块校验（VerifyChecksum no-op），
+// 字节错守护 = 结构/数量断言 + 内容 oracle（.expect 对拍）。
 //
 // 用法：
 //   zf_seal_check <in.prefix> [out.sst]
@@ -126,12 +126,12 @@ int Run(const std::string& in, const std::string& out_sst) {
   if (pfx.pps.size() < kPpsWords) return 2;
   const uint64_t* pps = pfx.pps.data();
 
-  // ---- §14.6 锁定档位选项（封口与直读共用同一份） ----
+  // ---- §14.6 解锁档位选项（kNoChecksum；封口与直读共用同一份） ----
   Options opts;
   opts.compression = kNoCompression;  // 默认 Options 是 Snappy，必须显式关掉
   BlockBasedTableOptions bbt;
   bbt.format_version = 2;
-  bbt.checksum = kCRC32c;
+  bbt.checksum = kNoChecksum;
   bbt.index_type = BlockBasedTableOptions::kBinarySearch;
   // 其余保持默认：无 filter、无 partition filter、block_restart_interval=16、
   // index_block_restart_interval=1。
@@ -237,7 +237,7 @@ int Run(const std::string& in, const std::string& out_sst) {
             s.ToString().c_str());
     return 2;
   }
-  // 逐块强校验 masked crc32c（覆盖 index + 每个 data 块）。
+  // kNoChecksum 下 VerifyChecksum 为 no-op（OK）；保留以作结构/契约断言。
   s = reader.VerifyChecksum(ReadOptions());
   if (!s.ok()) {
     fprintf(stderr, "zf_seal_check: VerifyChecksum: %s\n", s.ToString().c_str());
@@ -285,7 +285,7 @@ int Run(const std::string& in, const std::string& out_sst) {
             (unsigned long long)tp->key_smallest_seqno,
             (unsigned long long)tp->key_largest_seqno);
   }
-  fprintf(stderr, "read-back %llu entries, CRC+parse clean\n",
+  fprintf(stderr, "read-back %llu entries, structure+parse clean\n",
           (unsigned long long)n);
   fflush(stdout);
   return 0;

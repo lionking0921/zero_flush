@@ -1275,14 +1275,17 @@ ROCKSDB_NAMESPACE::Status Open(const ROCKSDB_NAMESPACE::Options& opt,
   zf_opt.memtable_factory = std::make_shared<SlimMemTableRepFactory>();
   // (F-1) §14.6 写档锁：zeroflush 产出的每个 SST（物化分区文件 / L0→base 归并输出）
   // 都必须能被 CSD-FPGA kernel 的 decoder_sst 直接解码，且与 FPGA 产物逐字节同构 ——
-  // v2 / kCRC32c / kBinarySearch / 无压缩（data 块 trailer 类型字节 0x00）/ restart 默认。
+  // v2 / kNoChecksum / kBinarySearch / 无压缩（data 块 trailer 类型字节 0x00，checksum
+  // 字段恒 0）/ restart 默认。checksum 为 CF 级唯一选项 → 全库（含 CPU 路径写入的
+  // SST）统一 kNoChecksum；reader 跳过逐块校验（2026-09-08 对齐参考 CoKV 去 CRC）。
   // 覆盖本 CF 下全部 BuildTable / 原生 compaction 写路径（FlushJob 与 ZfMaterializeJob
   // 的 output_compression / table_factory 均溯源到 CF options，此处即单点）。
-  // 说明：零档位文件仍可被引擎任何 TableReader 读回（版本自适应），只是写侧统一为 §14.6。
+  // 说明：kNoChecksum 文件仍可被引擎任何 TableReader 读回（版本自适应，跳过该校验），
+  // 只是写侧统一为 §14.6 解锁档位。
   {
     ROCKSDB_NAMESPACE::BlockBasedTableOptions zf_bbt;
     zf_bbt.format_version = 2;
-    zf_bbt.checksum = ROCKSDB_NAMESPACE::kCRC32c;
+    zf_bbt.checksum = ROCKSDB_NAMESPACE::kNoChecksum;
     zf_bbt.index_type = ROCKSDB_NAMESPACE::BlockBasedTableOptions::kBinarySearch;
     // 其余默认：block_restart_interval=16、index_block_restart_interval=1、
     // 无 filter / prefix / partition index —— 与 encoder/decoder_sst 口径一致。

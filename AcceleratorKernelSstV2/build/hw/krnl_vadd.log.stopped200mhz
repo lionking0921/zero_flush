@@ -1,0 +1,230 @@
+Option Map File Used: '/tools/Xilinx/Vitis/2022.2/data/vitis/vpp/optMap.xml'
+
+****** v++ v2022.2 (64-bit)
+  **** SW Build 3671529 on 2022-10-13-17:52:11
+    ** Copyright 1986-2022 Xilinx, Inc. All Rights Reserved.
+
+INFO: [v++ 60-1306] Additional information associated with this v++ compile can be found at:
+	Reports: /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/reports/krnl_vadd
+	Log files: /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/logs/krnl_vadd
+Running Dispatch Server on port: 42287
+INFO: [v++ 60-1548] Creating build summary session with primary output /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/build/hw/krnl_vadd.xo.compile_summary, at Tue Sep  8 09:02:22 2026
+INFO: [v++ 60-1315] Creating rulecheck session with output '/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/reports/krnl_vadd/v++_compile_krnl_vadd_guidance.html', at Tue Sep  8 09:02:22 2026
+INFO: [v++ 60-895]   Target platform: /opt/xilinx/platforms/xilinx_u2_gen3x4_xdma_gc_2_202110_1/xilinx_u2_gen3x4_xdma_gc_2_202110_1.xpfm
+INFO: [v++ 60-1578]   This platform contains Xilinx Shell Archive '/opt/xilinx/platforms/xilinx_u2_gen3x4_xdma_gc_2_202110_1/hw/hw.xsa'
+INFO: [v++ 74-78] Compiler Version string: 2022.2
+INFO: [v++ 60-585] Compiling for hardware target
+INFO: [v++ 60-423]   Target device: xilinx_u2_gen3x4_xdma_gc_2_202110_1
+INFO: [v++ 60-242] Creating kernel: 'krnl_vadd'
+INFO: [v++ 60-1616] Creating a HLS clock using hls.clock option: 200 MHz
+
+===>The following messages were generated while  performing high-level synthesis for kernel: krnl_vadd Log file: /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/krnl_vadd/krnl_vadd/vitis_hls.log :
+INFO: [v++ 204-61] Pipelining loop 'VITIS_LOOP_1163_1'.
+INFO: [v++ 200-1470] Pipelining result : Target II = NA, Final II = 73, Depth = 73, loop 'VITIS_LOOP_1163_1'
+INFO: [v++ 204-61] Pipelining function 'zf_ld_u32'.
+INFO: [v++ 200-1470] Pipelining result : Target II = NA, Final II = 2, Depth = 74, function 'zf_ld_u32'
+INFO: [v++ 204-61] Pipelining loop 'VITIS_LOOP_1324_1'.
+INFO: [v++ 204-61] Unable to satisfy pipeline directive for loop 'VITIS_LOOP_1324_1': unable to pipeline.
+INFO: [v++ 204-61] Pipelining loop 'VITIS_LOOP_1163_1'.
+INFO: [v++ 200-1470] Pipelining result : Target II = NA, Final II = 73, Depth = 73, loop 'VITIS_LOOP_1163_1'
+INFO: [v++ 204-61] Pipelining loop 'VITIS_LOOP_1210_1'.
+INFO: [v++ 200-1470] Pipelining result : Target II = NA, Final II = 1, Depth = 3, loop 'VITIS_LOOP_1210_1'
+INFO: [v++ 204-61] Pipelining loop 'VITIS_LOOP_1365_2'.
+INFO: [v++ 200-1470] Pipelining result : Target II = NA, Final II = 1, Depth = 1, loop 'VITIS_LOOP_1365_2'
+INFO: [v++ 204-61] Pipelining loop 'VITIS_LOOP_1596_3'.
+INFO: [v++ 200-1470] Pipelining result : Target II = NA, Final II = 1, Depth = 1, loop 'VITIS_LOOP_1596_3'
+INFO: [v++ 204-61] Pipelining loop 'VITIS_LOOP_1620_5'.
+INFO: [v++ 200-1470] Pipelining result : Target II = NA, Final II = 1, Depth = 1, loop 'VITIS_LOOP_1620_5'
+INFO: [v++ 204-61] Pipelining loop 'VITIS_LOOP_1621_6'.
+INFO: [v++ 200-1470] Pipelining result : Target II = NA, Final II = 1, Depth = 2, loop 'VITIS_LOOP_1621_6'
+INFO: [v++ 204-61] Pipelining loop 'VITIS_LOOP_1622_7'.
+INFO: [v++ 200-1470] Pipelining result : Target II = NA, Final II = 1, Depth = 73, loop 'VITIS_LOOP_1622_7'
+INFO: [v++ 204-61] Pipelining loop 'VITIS_LOOP_1662_9'.
+INFO: [v++ 200-1470] Pipelining result : Target II = NA, Final II = 1, Depth = 1, loop 'VITIS_LOOP_1662_9'
+INFO: [v++ 204-61] Pipelining loop 'VITIS_LOOP_1663_10'.
+INFO: [v++ 204-61] Unable to satisfy pipeline directive for loop 'VITIS_LOOP_1663_10': unable to pipeline.
+INFO: [v++ 204-61] Pipelining loop 'VITIS_LOOP_1676_11'.
+INFO: [v++ 200-1470] Pipelining result : Target II = NA, Final II = 1, Depth = 2, loop 'VITIS_LOOP_1676_11'
+INFO: [v++ 204-61] Pipelining loop 'VITIS_LOOP_3401_1'.
+INFO: [v++ 200-1470] Pipelining result : Target II = NA, Final II = 1, Depth = 1, loop 'VITIS_LOOP_3401_1'
+INFO: [v++ 204-61] Pipelining loop 'Loop 1'.
+INFO: [v++ 200-1470] Pipelining result : Target II = NA, Final II = 1, Depth = 1, loop 'Loop 1'
+INFO: [v++ 204-61] Pipelining loop 'VITIS_LOOP_3503_3'.
+WARNING: [v++ 200-885] The II Violation in module 'encoder_Pipeline_VITIS_LOOP_3503_3' (loop 'VITIS_LOOP_3503_3'): Unable to schedule 'store' operation ('now_value_c_V_addr_1_write_ln3510', /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/kernel/krnl_vadd.cpp:3510->/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/kernel/krnl_vadd.cpp:4257) of variable 'tem.c.V', /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/kernel/krnl_vadd.cpp:3506->/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/kernel/krnl_vadd.cpp:4257 on array 'now_value_c_V' due to limited memory ports (II = 1). Please consider using a memory core with more ports or partitioning the array 'now_value_c_V'.
+Resolution: For help on HLS 200-885 see www.xilinx.com/cgi-bin/docs/rdoc?v=2022.2;t=hls+guidance;d=200-885.html
+WARNING: [v++ 200-885] The II Violation in module 'encoder_Pipeline_VITIS_LOOP_3503_3' (loop 'VITIS_LOOP_3503_3'): Unable to schedule 'store' operation ('now_value_c_V_addr_3_write_ln3510', /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/kernel/krnl_vadd.cpp:3510->/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/kernel/krnl_vadd.cpp:4257) of variable 'tem.c.V', /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/kernel/krnl_vadd.cpp:3506->/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/kernel/krnl_vadd.cpp:4257 on array 'now_value_c_V' due to limited memory ports (II = 2). Please consider using a memory core with more ports or partitioning the array 'now_value_c_V'.
+Resolution: For help on HLS 200-885 see www.xilinx.com/cgi-bin/docs/rdoc?v=2022.2;t=hls+guidance;d=200-885.html
+WARNING: [v++ 200-885] The II Violation in module 'encoder_Pipeline_VITIS_LOOP_3503_3' (loop 'VITIS_LOOP_3503_3'): Unable to schedule 'store' operation ('now_value_c_V_addr_5_write_ln3510', /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/kernel/krnl_vadd.cpp:3510->/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/kernel/krnl_vadd.cpp:4257) of variable 'tem.c.V', /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/kernel/krnl_vadd.cpp:3506->/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/kernel/krnl_vadd.cpp:4257 on array 'now_value_c_V' due to limited memory ports (II = 3). Please consider using a memory core with more ports or partitioning the array 'now_value_c_V'.
+Resolution: For help on HLS 200-885 see www.xilinx.com/cgi-bin/docs/rdoc?v=2022.2;t=hls+guidance;d=200-885.html
+WARNING: [v++ 200-885] The II Violation in module 'encoder_Pipeline_VITIS_LOOP_3503_3' (loop 'VITIS_LOOP_3503_3'): Unable to schedule 'store' operation ('now_value_c_V_addr_7_write_ln3510', /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/kernel/krnl_vadd.cpp:3510->/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/kernel/krnl_vadd.cpp:4257) of variable 'tem.c.V', /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/kernel/krnl_vadd.cpp:3506->/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/kernel/krnl_vadd.cpp:4257 on array 'now_value_c_V' due to limited memory ports (II = 4). Please consider using a memory core with more ports or partitioning the array 'now_value_c_V'.
+Resolution: For help on HLS 200-885 see www.xilinx.com/cgi-bin/docs/rdoc?v=2022.2;t=hls+guidance;d=200-885.html
+WARNING: [v++ 200-885] The II Violation in module 'encoder_Pipeline_VITIS_LOOP_3503_3' (loop 'VITIS_LOOP_3503_3'): Unable to schedule 'store' operation ('now_value_c_V_addr_21_write_ln3510', /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/kernel/krnl_vadd.cpp:3510->/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/kernel/krnl_vadd.cpp:4257) of variable 'tem.c.V', /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/kernel/krnl_vadd.cpp:3506->/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/kernel/krnl_vadd.cpp:4257 on array 'now_value_c_V' due to limited memory ports (II = 11). Please consider using a memory core with more ports or partitioning the array 'now_value_c_V'.
+Resolution: For help on HLS 200-885 see www.xilinx.com/cgi-bin/docs/rdoc?v=2022.2;t=hls+guidance;d=200-885.html
+WARNING: [v++ 200-885] The II Violation in module 'encoder_Pipeline_VITIS_LOOP_3503_3' (loop 'VITIS_LOOP_3503_3'): Unable to schedule 'store' operation ('now_value_c_V_addr_29_write_ln3510', /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/kernel/krnl_vadd.cpp:3510->/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/kernel/krnl_vadd.cpp:4257) of variable 'tem.c.V', /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/kernel/krnl_vadd.cpp:3506->/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/kernel/krnl_vadd.cpp:4257 on array 'now_value_c_V' due to limited memory ports (II = 15). Please consider using a memory core with more ports or partitioning the array 'now_value_c_V'.
+Resolution: For help on HLS 200-885 see www.xilinx.com/cgi-bin/docs/rdoc?v=2022.2;t=hls+guidance;d=200-885.html
+INFO: [v++ 200-1470] Pipelining result : Target II = NA, Final II = 16, Depth = 17, loop 'VITIS_LOOP_3503_3'
+INFO: [v++ 204-61] Pipelining function 'ap32to128_encoder'.
+INFO: [v++ 200-1470] Pipelining result : Target II = NA, Final II = 4, Depth = 4, function 'ap32to128_encoder'
+INFO: [v++ 204-61] Pipelining loop 'VITIS_LOOP_2785_1'.
+INFO: [v++ 200-1470] Pipelining result : Target II = NA, Final II = 4, Depth = 4, loop 'VITIS_LOOP_2785_1'
+INFO: [v++ 204-61] Pipelining loop 'encoder_putvalue_data_loop'.
+INFO: [v++ 200-1470] Pipelining result : Target II = NA, Final II = 1, Depth = 5, loop 'encoder_putvalue_data_loop'
+INFO: [v++ 204-61] Pipelining loop 'VITIS_LOOP_3040_1'.
+INFO: [v++ 200-1470] Pipelining result : Target II = NA, Final II = 1, Depth = 2, loop 'VITIS_LOOP_3040_1'
+INFO: [v++ 204-61] Pipelining loop 'encoder_putRestartPoint_for_datablock_loop'.
+INFO: [v++ 200-1470] Pipelining result : Target II = NA, Final II = 4, Depth = 5, loop 'encoder_putRestartPoint_for_datablock_loop'
+INFO: [v++ 204-61] Pipelining function 'ap8to128_encoder_index_block'.
+INFO: [v++ 200-1470] Pipelining result : Target II = NA, Final II = 141, Depth = 142, function 'ap8to128_encoder_index_block'
+INFO: [v++ 204-61] Pipelining loop 'VITIS_LOOP_3208_2'.
+INFO: [v++ 200-1470] Pipelining result : Target II = NA, Final II = 141, Depth = 144, loop 'VITIS_LOOP_3208_2'
+INFO: [v++ 204-61] Pipelining loop 'encoder_ap128to128_loop'.
+INFO: [v++ 200-1470] Pipelining result : Target II = NA, Final II = 1, Depth = 3, loop 'encoder_ap128to128_loop'
+INFO: [v++ 204-61] Pipelining loop 'encoder_putRestartPoint_for_datablock_loop'.
+INFO: [v++ 200-1470] Pipelining result : Target II = NA, Final II = 4, Depth = 5, loop 'encoder_putRestartPoint_for_datablock_loop'
+INFO: [v++ 204-61] Pipelining loop 'encoder_ap128to128_loop'.
+INFO: [v++ 200-1470] Pipelining result : Target II = NA, Final II = 1, Depth = 3, loop 'encoder_ap128to128_loop'
+INFO: [v++ 204-61] Pipelining function 'ap32to128_encoder_index_block'.
+INFO: [v++ 200-1470] Pipelining result : Target II = NA, Final II = 142, Depth = 143, function 'ap32to128_encoder_index_block'
+INFO: [v++ 204-61] Pipelining loop 'encoder_putRestartPoint_for_indexblock_loop'.
+INFO: [v++ 200-1470] Pipelining result : Target II = NA, Final II = 142, Depth = 144, loop 'encoder_putRestartPoint_for_indexblock_loop'
+INFO: [v++ 204-61] Pipelining loop 'VITIS_LOOP_3487_2'.
+INFO: [v++ 200-1470] Pipelining result : Target II = NA, Final II = 1, Depth = 2, loop 'VITIS_LOOP_3487_2'
+INFO: [v++ 204-61] Pipelining loop 'encoder_putRestartPoint_for_datablock_loop'.
+INFO: [v++ 200-1470] Pipelining result : Target II = NA, Final II = 4, Depth = 5, loop 'encoder_putRestartPoint_for_datablock_loop'
+INFO: [v++ 204-61] Pipelining loop 'encoder_ap128to128_loop'.
+INFO: [v++ 200-1470] Pipelining result : Target II = NA, Final II = 1, Depth = 3, loop 'encoder_ap128to128_loop'
+INFO: [v++ 204-61] Pipelining loop 'encoder_putRestartPoint_for_indexblock_loop'.
+INFO: [v++ 200-1470] Pipelining result : Target II = NA, Final II = 142, Depth = 144, loop 'encoder_putRestartPoint_for_indexblock_loop'
+INFO: [v++ 204-61] Pipelining loop 'encoder_copy_pps_to_host_loop'.
+INFO: [v++ 200-1470] Pipelining result : Target II = NA, Final II = 1, Depth = 3, loop 'encoder_copy_pps_to_host_loop'
+INFO: [v++ 204-61] Pipelining loop 'encoder_copy_sstindex_to_host_loop'.
+INFO: [v++ 200-1470] Pipelining result : Target II = NA, Final II = 1, Depth = 2, loop 'encoder_copy_sstindex_to_host_loop'
+INFO: [v++ 204-61] Pipelining loop 'encoder_copy_index_block_index_to_host_loop'.
+INFO: [v++ 200-1470] Pipelining result : Target II = NA, Final II = 1, Depth = 2, loop 'encoder_copy_index_block_index_to_host_loop'
+INFO: [v++ 200-790] **** Loop Constraint Status: All loop constraints were NOT satisfied.
+INFO: [v++ 200-789] **** Estimated Fmax: 204.62 MHz
+INFO: [v++ 60-594] Finished kernel compilation
+INFO: [v++ 60-244] Generating system estimate report...
+INFO: [v++ 60-1092] Generated system estimate report: /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/reports/krnl_vadd/system_estimate_krnl_vadd.xtxt
+WARNING: [v++-17-1525]  
+INFO: [v++ 60-586] Created build/hw/krnl_vadd.xo
+INFO: [v++ 60-2343] Use the vitis_analyzer tool to visualize and navigate the relevant reports. Run the following command. 
+    vitis_analyzer /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/build/hw/krnl_vadd.xo.compile_summary 
+INFO: [v++ 60-791] Total elapsed time: 0h 3m 6s
+INFO: [v++ 60-1653] Closing dispatch client.
+Option Map File Used: '/tools/Xilinx/Vitis/2022.2/data/vitis/vpp/optMap.xml'
+
+****** v++ v2022.2 (64-bit)
+  **** SW Build 3671529 on 2022-10-13-17:52:11
+    ** Copyright 1986-2022 Xilinx, Inc. All Rights Reserved.
+
+INFO: [v++ 60-1306] Additional information associated with this v++ link can be found at:
+	Reports: /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/reports/link
+	Log files: /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/logs/link
+Running Dispatch Server on port: 46877
+INFO: [v++ 60-1548] Creating build summary session with primary output /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/build/hw/krnl_vadd.xclbin.link_summary, at Tue Sep  8 09:05:30 2026
+INFO: [v++ 60-1315] Creating rulecheck session with output '/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/reports/link/v++_link_krnl_vadd_guidance.html', at Tue Sep  8 09:05:30 2026
+INFO: [v++ 60-895]   Target platform: /opt/xilinx/platforms/xilinx_u2_gen3x4_xdma_gc_2_202110_1/xilinx_u2_gen3x4_xdma_gc_2_202110_1.xpfm
+INFO: [v++ 60-1578]   This platform contains Xilinx Shell Archive '/opt/xilinx/platforms/xilinx_u2_gen3x4_xdma_gc_2_202110_1/hw/hw.xsa'
+INFO: [v++ 74-78] Compiler Version string: 2022.2
+INFO: [v++ 60-629] Linking for hardware target
+INFO: [v++ 60-423]   Target device: xilinx_u2_gen3x4_xdma_gc_2_202110_1
+INFO: [v++ 60-1332] Run 'run_link' status: Not started
+INFO: [v++ 60-1443] [09:05:34] Run run_link: Step system_link: Started
+INFO: [v++ 60-1453] Command Line: system_link --xo /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/build/hw/krnl_vadd.xo --xpfm /opt/xilinx/platforms/xilinx_u2_gen3x4_xdma_gc_2_202110_1/xilinx_u2_gen3x4_xdma_gc_2_202110_1.xpfm --target hw --output_dir /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/int --temp_dir /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/sys_link
+INFO: [v++ 60-1454] Run Directory: /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/run_link
+INFO: [SYSTEM_LINK 82-70] Extracting xo v3 file /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/build/hw/krnl_vadd.xo
+INFO: [SYSTEM_LINK 82-53] Creating IP database /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/sys_link/_sysl/.cdb/xd_ip_db.xml
+INFO: [SYSTEM_LINK 82-38] [09:05:36] build_xd_ip_db started: /tools/Xilinx/Vitis/2022.2/bin/build_xd_ip_db -ip_search 0  -sds-pf /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/sys_link/hw.hpfm -clkid 0 -ip /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/sys_link/iprepo/xilinx_com_hls_krnl_vadd_1_0,krnl_vadd -o /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/sys_link/_sysl/.cdb/xd_ip_db.xml
+INFO: [SYSTEM_LINK 82-37] [09:05:43] build_xd_ip_db finished successfully
+Time (s): cpu = 00:00:07 ; elapsed = 00:00:07 . Memory (MB): peak = 434.836 ; gain = 0.000 ; free physical = 129174 ; free virtual = 142386
+INFO: [SYSTEM_LINK 82-51] Create system connectivity graph
+INFO: [SYSTEM_LINK 82-102] Applying explicit connections to the system connectivity graph: /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/sys_link/cfgraph/cfgen_cfgraph.xml
+INFO: [SYSTEM_LINK 82-38] [09:05:43] cfgen started: /tools/Xilinx/Vitis/2022.2/bin/cfgen  -dpa_mem_offload false -dmclkid 0 -r /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/sys_link/_sysl/.cdb/xd_ip_db.xml -o /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/sys_link/cfgraph/cfgen_cfgraph.xml
+INFO: [CFGEN 83-0] Kernel Specs: 
+INFO: [CFGEN 83-0]   kernel: krnl_vadd, num: 1  {krnl_vadd_1}
+INFO: [CFGEN 83-2226] Inferring mapping for argument krnl_vadd_1.sst_input0 to bank0
+INFO: [CFGEN 83-2226] Inferring mapping for argument krnl_vadd_1.sst_input1 to bank0
+INFO: [CFGEN 83-2226] Inferring mapping for argument krnl_vadd_1.sst_input2 to bank0
+INFO: [CFGEN 83-2226] Inferring mapping for argument krnl_vadd_1.sst_input3 to bank0
+INFO: [CFGEN 83-2226] Inferring mapping for argument krnl_vadd_1.host_data to bank0
+INFO: [CFGEN 83-2226] Inferring mapping for argument krnl_vadd_1.output_data to bank0
+INFO: [CFGEN 83-2226] Inferring mapping for argument krnl_vadd_1.sst_buffer to bank0
+INFO: [CFGEN 83-2226] Inferring mapping for argument krnl_vadd_1.index_block_result to bank0
+INFO: [SYSTEM_LINK 82-37] [09:05:47] cfgen finished successfully
+Time (s): cpu = 00:00:03 ; elapsed = 00:00:03 . Memory (MB): peak = 434.836 ; gain = 0.000 ; free physical = 129164 ; free virtual = 142376
+INFO: [SYSTEM_LINK 82-52] Create top-level block diagram
+INFO: [SYSTEM_LINK 82-38] [09:05:47] cf2bd started: /tools/Xilinx/Vitis/2022.2/bin/cf2bd  --linux --trace_buffer 1024 --input_file /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/sys_link/cfgraph/cfgen_cfgraph.xml --ip_db /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/sys_link/_sysl/.cdb/xd_ip_db.xml --cf_name dr --working_dir /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/sys_link/_sysl/.xsd --temp_dir /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/sys_link --output_dir /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/int --target_bd ulp.bd
+INFO: [CF2BD 82-31] Launching cf2xd: cf2xd -linux -trace-buffer 1024 -i /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/sys_link/cfgraph/cfgen_cfgraph.xml -r /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/sys_link/_sysl/.cdb/xd_ip_db.xml -o dr.xml
+INFO: [CF2BD 82-28] cf2xd finished successfully
+INFO: [CF2BD 82-31] Launching cf_xsd: cf_xsd -disable-address-gen -bd ulp.bd -dn dr -dp /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/sys_link/_sysl/.xsd
+INFO: [CF2BD 82-28] cf_xsd finished successfully
+INFO: [SYSTEM_LINK 82-37] [09:05:50] cf2bd finished successfully
+Time (s): cpu = 00:00:03 ; elapsed = 00:00:03 . Memory (MB): peak = 434.836 ; gain = 0.000 ; free physical = 129134 ; free virtual = 142351
+INFO: [v++ 60-1441] [09:05:50] Run run_link: Step system_link: Completed
+Time (s): cpu = 00:00:15 ; elapsed = 00:00:16 . Memory (MB): peak = 440.535 ; gain = 0.000 ; free physical = 129199 ; free virtual = 142411
+INFO: [v++ 60-1443] [09:05:50] Run run_link: Step cf2sw: Started
+INFO: [v++ 60-1453] Command Line: cf2sw -sdsl /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/int/sdsl.dat -rtd /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/int/cf2sw.rtd -nofilter /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/int/cf2sw_full.rtd -xclbin /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/int/xclbin_orig.xml -o /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/int/xclbin_orig.1.xml
+INFO: [v++ 60-1454] Run Directory: /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/run_link
+INFO: [v++ 60-1441] [09:05:53] Run run_link: Step cf2sw: Completed
+Time (s): cpu = 00:00:03 ; elapsed = 00:00:03 . Memory (MB): peak = 440.535 ; gain = 0.000 ; free physical = 129846 ; free virtual = 143058
+INFO: [v++ 60-1443] [09:05:53] Run run_link: Step rtd2_system_diagram: Started
+INFO: [v++ 60-1453] Command Line: rtd2SystemDiagram
+INFO: [v++ 60-1454] Run Directory: /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/run_link
+INFO: [v++ 60-1441] [09:05:54] Run run_link: Step rtd2_system_diagram: Completed
+Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00.22 . Memory (MB): peak = 440.535 ; gain = 0.000 ; free physical = 129835 ; free virtual = 143047
+INFO: [v++ 60-1443] [09:05:54] Run run_link: Step vpl: Started
+INFO: [v++ 60-1453] Command Line: vpl -t hw -f /opt/xilinx/platforms/xilinx_u2_gen3x4_xdma_gc_2_202110_1/xilinx_u2_gen3x4_xdma_gc_2_202110_1.xpfm --remote_ip_cache /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/.ipcache --output_dir /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/int --log_dir /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/logs/link --report_dir /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/reports/link --config /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/int/vplConfig.ini -k /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/int/kernel_info.dat --webtalk_flag Vitis --temp_dir /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link --no-info --iprepo /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/int/xo/ip_repo/xilinx_com_hls_krnl_vadd_1_0 --messageDb /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/run_link/vpl.pb /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/int/dr.bd.tcl
+INFO: [v++ 60-1454] Run Directory: /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/run_link
+
+****** vpl v2022.2 (64-bit)
+  **** SW Build 3671529 on 2022-10-13-17:52:11
+    ** Copyright 1986-2022 Xilinx, Inc. All Rights Reserved.
+
+INFO: [VPL 60-839] Read in kernel information from file '/home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/int/kernel_info.dat'.
+INFO: [VPL 74-78] Compiler Version string: 2022.2
+INFO: [VPL 60-423]   Target device: xilinx_u2_gen3x4_xdma_gc_2_202110_1
+INFO: [VPL 60-1032] Extracting hardware platform to /home/embedded-415/wjd/ZeroFlush/zero_flush/AcceleratorKernelSstV2/_x/link/vivado/vpl/.local/hw_platform
+[09:06:06] Run vpl: Step create_project: Started
+Creating Vivado project.
+[09:06:10] Run vpl: Step create_project: Completed
+[09:06:10] Run vpl: Step create_bd: Started
+[09:06:52] Run vpl: Step create_bd: Completed
+[09:06:52] Run vpl: Step update_bd: Started
+[09:06:52] Run vpl: Step update_bd: Completed
+[09:06:52] Run vpl: Step generate_target: Started
+[09:07:30] Run vpl: Step generate_target: Completed
+[09:07:30] Run vpl: Step config_hw_runs: Started
+[09:07:32] Run vpl: Step config_hw_runs: Completed
+[09:07:32] Run vpl: Step synth: Started
+[09:08:02] Block-level synthesis in progress, 0 of 1 jobs complete, 1 job running.
+[09:08:32] Block-level synthesis in progress, 0 of 1 jobs complete, 1 job running.
+[09:09:02] Block-level synthesis in progress, 0 of 1 jobs complete, 1 job running.
+[09:09:33] Block-level synthesis in progress, 0 of 1 jobs complete, 1 job running.
+[09:10:03] Block-level synthesis in progress, 0 of 1 jobs complete, 1 job running.
+[09:10:33] Block-level synthesis in progress, 0 of 1 jobs complete, 1 job running.
+[09:11:03] Block-level synthesis in progress, 0 of 1 jobs complete, 1 job running.
+[09:11:33] Block-level synthesis in progress, 0 of 1 jobs complete, 1 job running.
+[09:12:03] Block-level synthesis in progress, 0 of 1 jobs complete, 1 job running.
+[09:12:33] Block-level synthesis in progress, 0 of 1 jobs complete, 1 job running.
+[09:13:03] Block-level synthesis in progress, 0 of 1 jobs complete, 1 job running.
+[09:13:33] Block-level synthesis in progress, 0 of 1 jobs complete, 1 job running.
+[09:14:04] Block-level synthesis in progress, 0 of 1 jobs complete, 1 job running.
+[09:14:34] Block-level synthesis in progress, 0 of 1 jobs complete, 1 job running.
+[09:15:04] Block-level synthesis in progress, 0 of 1 jobs complete, 1 job running.
+[09:15:34] Block-level synthesis in progress, 0 of 1 jobs complete, 1 job running.
+[09:16:04] Block-level synthesis in progress, 0 of 1 jobs complete, 1 job running.
+[09:16:34] Block-level synthesis in progress, 0 of 1 jobs complete, 1 job running.
+[09:17:04] Block-level synthesis in progress, 0 of 1 jobs complete, 1 job running.
+[09:17:34] Block-level synthesis in progress, 0 of 1 jobs complete, 1 job running.
+[09:18:04] Block-level synthesis in progress, 0 of 1 jobs complete, 1 job running.
+[09:18:34] Block-level synthesis in progress, 0 of 1 jobs complete, 1 job running.
+[09:19:05] Block-level synthesis in progress, 0 of 1 jobs complete, 1 job running.
+[09:19:35] Block-level synthesis in progress, 0 of 1 jobs complete, 1 job running.
+[09:20:05] Block-level synthesis in progress, 0 of 1 jobs complete, 1 job running.
+[09:20:35] Block-level synthesis in progress, 0 of 1 jobs complete, 1 job running.
+[09:21:05] Block-level synthesis in progress, 0 of 1 jobs complete, 1 job running.
+[09:21:35] Block-level synthesis in progress, 0 of 1 jobs complete, 1 job running.
+[09:22:05] Block-level synthesis in progress, 0 of 1 jobs complete, 1 job running.
+[09:22:35] Block-level synthesis in progress, 0 of 1 jobs complete, 1 job running.
+[09:23:05] Block-level synthesis in progress, 0 of 1 jobs complete, 1 job running.

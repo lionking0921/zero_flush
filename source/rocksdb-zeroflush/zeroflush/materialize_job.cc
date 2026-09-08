@@ -1236,7 +1236,8 @@ ROCKSDB_NAMESPACE::Status ZfMaterializeJob::MaterializePartition(
 // F-2：CSD A-only 直装卸载（见 materialize_job.h）。与 host build_one 收尾逐
 // 字段同构产出 meta；文件 = 设备 [data+index] 前缀 + ZfSeal 封口（引擎自身
 // PropertyBlockBuilder/MetaIndexBuilder/FooterBuilder 序列化，逐字段镜像写档
-// 配置）→ 引擎任何 reader 可打开（CRC 逐块强校验，字节错即 Corruption）。
+// 配置）→ 引擎任何 reader 可打开（§14.6 解锁 kNoChecksum：5B trailer 的
+// checksum 字段恒 0，reader 跳过该校验；字节错守护 = 结构解析 + 内容 oracle）。
 bool ZfMaterializeJob::TryCsdDirectMaterialize(
     uint32_t part_id, uint32_t gen, const std::vector<std::string>& keys,
     const std::vector<std::string>& values) {
@@ -1396,7 +1397,7 @@ bool ZfMaterializeJob::TryCsdDirectMaterialize(
         ROCKSDB_NAMESPACE::kMaxSequenceNumber);
     ROCKSDB_NAMESPACE::BlockBasedTableOptions locked_bbt;  // F-1 §14.6 锁档
     locked_bbt.format_version = 2;
-    locked_bbt.checksum = ROCKSDB_NAMESPACE::kCRC32c;
+    locked_bbt.checksum = ROCKSDB_NAMESPACE::kNoChecksum;
     locked_bbt.index_type =
         ROCKSDB_NAMESPACE::BlockBasedTableOptions::kBinarySearch;
     ROCKSDB_NAMESPACE::ZfSealOptions zfopt;
@@ -2187,7 +2188,7 @@ bool ZfMaterializeJob::TryCsdMergeMaterialize(
         ROCKSDB_NAMESPACE::kMaxSequenceNumber);
     ROCKSDB_NAMESPACE::BlockBasedTableOptions locked_bbt;  // F-1 §14.6 锁档
     locked_bbt.format_version = 2;
-    locked_bbt.checksum = ROCKSDB_NAMESPACE::kCRC32c;
+    locked_bbt.checksum = ROCKSDB_NAMESPACE::kNoChecksum;
     locked_bbt.index_type =
         ROCKSDB_NAMESPACE::BlockBasedTableOptions::kBinarySearch;
     ROCKSDB_NAMESPACE::ZfSealOptions zfopt;
@@ -2220,8 +2221,9 @@ bool ZfMaterializeJob::TryCsdMergeMaterialize(
 
   // (10) 边界反读（与直装的差异点）：设备裁剪后存活首/尾内部键只有设备知道。
   //      以 (number, file_size) 临时 FileMetaData 经引擎 table_cache 重开已封口
-  //      文件（隐含逐块 CRC 强校验）：全迭代计数必须 == pps[1]（正确性锚），
-  //      首/尾键即精确文件边界（每 user 键单版本）。失败 → 删文件回落。
+  //      文件（§14.6 解锁 kNoChecksum：reader 跳过逐块校验；仍按 CF 选项解析全部
+  //      块头/偏移 → 结构错即迭代异常/计数不齐）：全迭代计数必须 == pps[1]
+  //      （正确性锚），首/尾键即精确文件边界（每 user 键单版本）。失败 → 删文件回落。
   ROCKSDB_NAMESPACE::FileMetaData probe_meta;
   probe_meta.fd = ROCKSDB_NAMESPACE::FileDescriptor(file_number, 0, file_size);
   ROCKSDB_NAMESPACE::ReadOptions ro_r(

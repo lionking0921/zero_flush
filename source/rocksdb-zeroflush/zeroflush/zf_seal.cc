@@ -9,7 +9,7 @@
 //  时点对 rep_->props 的赋值；properties/metaindex/footer 本体复用它自己的
 //   PropertyBlockBuilder/MetaIndexBuilder/FooterBuilder，保证 byte-exact。
 //
-//  锁档（§14.6，见 zf_seal.h）：format_version==2、kCRC32c、kBinarySearch、
+//  锁档（§14.6，见 zf_seal.h）：format_version==2、checksum=kNoChecksum|kCRC32c、kBinarySearch、
 //  kNoCompression、无 filter / prefix / merge / 显式 compression-manager /
 //  外部 property collector（internal 与 user 两层都要空）。不满足返回
 //  InvalidArgument，绝不偷偷降级。
@@ -57,7 +57,12 @@ bool ZfSealLockedConfigOk(const ZfSealOptions& options, std::string* why) {
   ZF_GATE(topt.format_version == 2,
           "only format_version == 2 is supported (context checksum / "
           "compression-manager / footer layouts are versioned)");
-  ZF_GATE(topt.checksum == kCRC32c, "only kCRC32c checksum is supported");
+  // (里程碑 3→kNoChecksum) CSD 档位对齐参考 CoKV：checksum = kNoChecksum（5B trailer 的
+  // checksum 字段恒 0，reader 跳过该校验）或 kCRC32c（CPU 侧封口保留）。kNoChecksum 下
+  // ComputeBuiltinChecksumWithLastByte 返回 0（format.cc:681 default）→ 与 kernel 零
+  // checksum 逐字节一致。
+  ZF_GATE(topt.checksum == kNoChecksum || topt.checksum == kCRC32c,
+          "only kNoChecksum / kCRC32c checksum is supported");
   ZF_GATE(topt.index_type == BlockBasedTableOptions::kBinarySearch,
           "only kBinarySearch index is supported");
   ZF_GATE(topt.filter_policy == nullptr, "filter_policy must be nullptr");
@@ -184,7 +189,8 @@ Status ZfSealAssembleProperties(const ZfSealOptions& options,
 
 // 追加一个"未压缩块 + 5B trailer"：与引擎 WriteMaybeCompressedBlockImpl
 // (2100-2242) 的 trailer 口径一致：trailer[0]=kNoCompression(0)；
-// checksum = ComputeBuiltinChecksumWithLastByte(kCRC32c, content, type_byte)
+// checksum = ComputeBuiltinChecksumWithLastByte(topt.checksum, content, type_byte)
+// （kNoChecksum → 0，见 format.cc:681 default）
 // + ChecksumModifierForContext(base=0, ...)（v2 → 0）。
 Status ZfSealAppendBlock(const ZfSealOptions& options, WritableFileWriter* file,
                          const IOOptions& io_opts, uint64_t* offset,

@@ -1392,15 +1392,17 @@ void decoder(ap_uint<32> *buf,  ap_uint<32> kv_sum, ap_uint<40> file_size, hls::
     ============================================================
 
     语义：B 侧输入 = 引擎 base/L0 层已封口 §14.6 .sst 文件字节（raw SST，含
-    [data 块][index 块][properties][metaindex][footer]，footer 53B、v2 / kCRC32c /
-    kBinarySearch / kNoCompression）。为支持"1 口 = 一个分区内 overlap 文件链"，
+    [data 块][index 块][properties][metaindex][footer]，footer 53B、v2 /
+    kBinarySearch / kNoCompression；checksum 档 = kNoChecksum(0, M1 起全 CF 解锁)
+    或 kCRC32c(1, 兼容遗留文件)）。为支持"1 口 = 一个分区内 overlap 文件链"，
     缓冲内放一个文件描述表：链字节区布局
         [u64 K] [K × { u64 file_off, u64 file_sz }] [ 文件1 字节..文件K 字节 ]
     同一口内各文件键范围互不相交且有序，跨文件续解 → 整口产出同一条有序 KV 流。
 
     每文件解码（顺序流式，不做随机 seek）：
       1) 读尾部 53B footer：校验 block-based magic / format_version==2 /
-         checksum==kCRC32c(1)（任一不符 → 结构错误）；
+         checksum ∈ {kNoChecksum(0), kCRC32c(1)}（任一不符 → 结构错误）；
+         decoder 只做结构解析、不逐块验 CRC，故两种 checksum 档同构解码；
       2) 解析单级 index BlockHandle（content size 不含 5B trailer）→ 顺序遍历
          index 块每条 entry（record + restart 前缀），取 value 里的 BlockHandle
          → 得各 data block 的 (offset,size)；
@@ -1474,7 +1476,7 @@ void decoder_sst(ap_uint<32>* buf, ap_uint<40> file_size, hls::stream<fifo_key_m
             const ap_uint<64> FB = foff;    // 文件首字节（链内绝对偏移）
             const ap_uint<64> FE = foff + fsz;
             // ---- 1) footer 尾部解析（53B，块表 v2）----
-            // 布局：byte[FE-53]=chk_type(1=kCRC32c)；其后 metaindex BlockHandle
+            // 布局：byte[FE-53]=chk_type(0=kNoChecksum[M1 全 CF]/1=kCRC32c)；其后 metaindex BlockHandle
             // varints（丢弃）→ index BlockHandle varints；末尾 12B = version u32 LE
             // + magic u64 LE（bytes [FE-12..FE-9) / [FE-8..FE)）。
             if (fsz < 53)
@@ -1501,7 +1503,7 @@ void decoder_sst(ap_uint<32>* buf, ap_uint<40> file_size, hls::stream<fifo_key_m
                 good = false;
                 break;
             }
-            if (chk != 1)
+            if (chk != 0 && chk != 1)   // 0=kNoChecksum(M1 起全 CF) 1=kCRC32c(遗留) —— 结构解码同构
             {
                 printf("decoder_sst: file %d unsupported checksum type %u\n",
                        (int)f, (unsigned)chk.to_uint());
@@ -3614,14 +3616,11 @@ void encoder(hls::stream<fifo_key_meta> &input_km, hls::stream<fifo_value_slice>
                                     index_block_index, index_block_result, index_block_offset,
                                     index_block_restart_point, index_block_restart_point_num);
 
-                // (里程碑 3) 真 crc32c trailer：块内容（记录+重启区，即写 5B trailer 前的
-                // data_block_index 字节）完整在 bram，字节区间 [pre_page_change_remain, +len)；
-                // checksum = Mask(crc32c(内容 || 0x00=kNoCompression)) —— 引擎
-                // ComputeBuiltinChecksumWithLastByte 语义（format_version=2 / kCRC32c）。
-                ap_uint<32> zf_data_crc =
-                    zf_crc_block(data_block_buffer_bram, pre_page_change_remain, data_block_index);
+                // (里程碑 3→kNoChecksum) 零 checksum trailer：块内容（记录+重启区）在 bram 落
+                // 5B trailer（[0]=0x00=kNoCompression + 4B checksum 恒 0）。对齐参考 :3312-3316
+                // 与引擎 §14.6 解锁档位（kNoChecksum）：reader 跳过该校验，结构 5B 布局不变。
                 ap8to128_encoder(0, data_block_buffer_bram, bram_read_index);
-                ap32to128_encoder(zf_data_crc, data_block_buffer_bram, bram_read_index+1);
+                ap32to128_encoder(0, data_block_buffer_bram, bram_read_index+1);
                 bram_read_index+=5;
                 data_block_index+=5;
 
@@ -3679,11 +3678,9 @@ void encoder(hls::stream<fifo_key_meta> &input_km, hls::stream<fifo_value_slice>
                                         index_block_index, index_block_result, index_block_offset,
                                         index_block_restart_point, index_block_restart_point_num);
 
-                    // (里程碑 3) 真 crc32c trailer —— 同站点 1，块内容仍在 bram
-                    ap_uint<32> zf_data_crc2 =
-                        zf_crc_block(data_block_buffer_bram, pre_page_change_remain, data_block_index);
+                    // (里程碑 3→kNoChecksum) 零 checksum trailer —— 同站点 1，块内容仍在 bram
                     ap8to128_encoder(0, data_block_buffer_bram, bram_read_index);
-                    ap32to128_encoder(zf_data_crc2, data_block_buffer_bram, bram_read_index+1);
+                    ap32to128_encoder(0, data_block_buffer_bram, bram_read_index+1);
                     bram_read_index+=5;
                     data_block_index+=5;
 
@@ -3740,13 +3737,10 @@ void encoder(hls::stream<fifo_key_meta> &input_km, hls::stream<fifo_value_slice>
                 index_block_restart_point_num=1;
                 index_block_restart_point[0]=0;
 
-                // (里程碑 3) 真 crc32c trailer：索引块内容顺序直写 DRAM，无页携带，
-                // 块尾对 [index_block_offset, index_block_index) 读回一次算 CRC，
-                // checksum = Mask(crc32c(内容 || 0x00)) —— 与 data 块同一语义。
-                ap_uint<32> zf_index_crc =
-                    zf_crc_block(index_block_result, index_block_offset, index_block_index - index_block_offset);
+                // (里程碑 3→kNoChecksum) 零 checksum trailer：索引块内容顺序直写 DRAM，无页携带，
+                // 块尾写 5B trailer（[0]=0x00 + 4B checksum 恒 0）—— 与 data 块同一语义。
                 ap8to128_encoder_index_block(0, index_block_result, index_block_index);
-                ap32to128_encoder_index_block(zf_index_crc, index_block_result, index_block_index+1);
+                ap32to128_encoder_index_block(0, index_block_result, index_block_index+1);
                 index_block_index+=5;
 
                 top_index_block_index[output_file_num]=index_block_index-index_block_offset;
@@ -3808,11 +3802,9 @@ void encoder(hls::stream<fifo_key_meta> &input_km, hls::stream<fifo_value_slice>
                                 index_block_index, index_block_result, index_block_offset,
                                 index_block_restart_point, index_block_restart_point_num);
 
-            // (里程碑 3) 真 crc32c trailer —— 同站点 1，块内容仍在 bram
-            ap_uint<32> zf_data_crc2 =
-                zf_crc_block(data_block_buffer_bram, pre_page_change_remain, data_block_index);
+            // (里程碑 3→kNoChecksum) 零 checksum trailer —— 同站点 1，块内容仍在 bram
             ap8to128_encoder(0, data_block_buffer_bram, bram_read_index);
-            ap32to128_encoder(zf_data_crc2, data_block_buffer_bram, bram_read_index+1);
+            ap32to128_encoder(0, data_block_buffer_bram, bram_read_index+1);
             bram_read_index+=5;
             data_block_index+=5;
 
@@ -3869,13 +3861,10 @@ void encoder(hls::stream<fifo_key_meta> &input_km, hls::stream<fifo_value_slice>
         index_block_restart_point_num=1;
         index_block_restart_point[0]=0;
 
-        // (里程碑 3) 真 crc32c trailer：索引块内容顺序直写 DRAM，无页携带，
-        // 块尾对 [index_block_offset, index_block_index) 读回一次算 CRC，
-        // checksum = Mask(crc32c(内容 || 0x00)) —— 与 data 块同一语义。
-        ap_uint<32> zf_index_crc =
-            zf_crc_block(index_block_result, index_block_offset, index_block_index - index_block_offset);
+        // (里程碑 3→kNoChecksum) 零 checksum trailer：索引块内容顺序直写 DRAM，无页携带，
+        // 块尾写 5B trailer（[0]=0x00 + 4B checksum 恒 0）—— 与 data 块同一语义。
         ap8to128_encoder_index_block(0, index_block_result, index_block_index);
-        ap32to128_encoder_index_block(zf_index_crc, index_block_result, index_block_index+1);
+        ap32to128_encoder_index_block(0, index_block_result, index_block_index+1);
         index_block_index+=5;
 
         top_index_block_index[output_file_num]=index_block_index-index_block_offset;

@@ -1753,6 +1753,14 @@ if(WITH_BENCHMARK_TOOLS)
       ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_link_libraries(zf_csd_test${ARTIFACT_SUFFIX}
       ${ROCKSDB_LIB} ${THIRDPARTY_LIBS} zeroflush_csd pthread)
+    # 第 0 步 micro-bench：真卡紧循环 RunAb 分段计时（ZF_CSD_PROFILE=1）。
+    add_executable(zf_runab_microbench${ARTIFACT_SUFFIX}
+      tools/zf_runab_microbench.cc)
+    target_include_directories(zf_runab_microbench${ARTIFACT_SUFFIX} PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}
+      ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(zf_runab_microbench${ARTIFACT_SUFFIX}
+      ${ROCKSDB_LIB} ${THIRDPARTY_LIBS} zeroflush_csd pthread)
     # db_bench：链 CSD 插件以便 --zeroflush --zf_csd 真卡卸载（weak→strong 自动
     # 注册）；不设 --zf_csd 时行为不变。XRT-free 构建路径下不执行本分支。
     target_link_libraries(db_bench${ARTIFACT_SUFFIX}
