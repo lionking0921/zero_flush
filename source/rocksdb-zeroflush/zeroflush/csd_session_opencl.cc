@@ -126,16 +126,6 @@ struct OcCtx {
   }
 };
 
-cl::Buffer MakeBuf(OcCtx& c, size_t bytes, bool* ok) {
-  cl_int err;
-  cl::Buffer b(c.ctx, CL_MEM_READ_WRITE, bytes, nullptr, &err);
-  if (err != CL_SUCCESS) {
-    fprintf(stderr, "[ZF csd] buffer alloc %zu err %d\n", bytes, err);
-    *ok = false;
-  }
-  return b;
-}
-
 bool MapBlob(OcCtx& c, cl::Buffer& b, size_t total, const uint8_t* src,
              size_t len) {
   cl_int err;
@@ -174,6 +164,12 @@ class ZfCsdSessionOpencl final : public ZfCsdSession {
     // 引擎物化以 materialize_parallelism 个 worker 并行调用本会话；内核为单实例
     // （nk=krnl_vadd:1），cl::CommandQueue / cl::Kernel 非线程安全 → 整段串行化。
     // 设备侧本就必须一次一 run（单内核），互斥不损吞吐。
+    //
+    // #37 ①缓冲池：跨 run 复用 cl::Buffer（容量单调增长，只扩不缩），消灭每次
+    // ~40MB clCreateBuffer/释放的驱动往返（profile 的 outbuf≈14ms 几乎全在此）。
+    // 每次 run 仍 map→写/读→unmap（U2 已验证语义），仅缓冲对象本身被复用。
+    // 出借表由 pool_mu_ 护（run_mu_ 已串行整段 → 实际单出借；为将来 async 并发
+    // 打包预留多集）。语义零变：同字节入同尺寸缓冲，pps 每次清零（等价现建零缓冲）。
     std::lock_guard<std::mutex> lock(run_mu_);
     if (out == nullptr) {
       return ROCKSDB_NAMESPACE::Status::InvalidArgument("null csd output");
@@ -183,10 +179,13 @@ class ZfCsdSessionOpencl final : public ZfCsdSession {
     uint64_t kern_us = 0;  // 设备侧 kernel 纯算（event 起止；enq_fin 段内含启动/收尾）
     if (prof_) t0 = ZfNowUs();
 
+    // ---- 缓冲池出借（RAII 归还；所有 return/throw 都释放）----
+    BufSet* S = CheckoutBufSet();
+    BufSetGuard rel(S, &pool_mu_);
+
     const uint32_t nslots = CountSlots(slots);
     uint64_t staged_bytes = 0;  // 输入字节合计（含空口 0）
     // ---- 输入口缓冲（4K 对齐；空口 = 全零 4KB，镜像 main_zf）----
-    std::vector<cl::Buffer> inbuf;
     uint64_t wal_bytes[4] = {0, 0, 0, 0};
     uint64_t kv[4] = {0, 0, 0, 0};
     uint32_t kind[4] = {0, 0, 0, 0};
@@ -200,29 +199,33 @@ class ZfCsdSessionOpencl final : public ZfCsdSession {
           (p < nslots) ? slots[p].bytes : kEmptyBytes();
       staged_bytes += src.size();
       const size_t cap = std::max<size_t>(CSD_ALIGN_TO_4K(src.size()), 4096);
-      bool ok = true;
-      cl::Buffer b = MakeBuf(c_, cap, &ok);
-      if (!ok) {
+      if (!EnsureBuf(c_, S->in[p], S->in_cap[p], cap, "csd in-buffer")) {
         return ROCKSDB_NAMESPACE::Status::IOError("csd in-buffer alloc");
       }
-      if (!MapBlob(c_, b, cap, src.data(), src.size())) {
+      if (!MapBlob(c_, S->in[p], cap, src.data(), src.size())) {
         return ROCKSDB_NAMESPACE::Status::IOError("csd in-buffer map");
       }
-      inbuf.push_back(b);
     }
     if (prof_) t1 = ZfNowUs();
     // ---- 输出预算缓冲：容量 ≥ 预算（写满预算前 kernel 必须在界内）----
     const uint64_t sst_cap = CSD_ALIGN_TO_4K(sst_bytes);
     const uint64_t idx_cap = CSD_ALIGN_TO_4K(idx_bytes);
-    bool ok = true;
-    cl::Buffer sst_dev = MakeBuf(c_, std::max<uint64_t>(sst_cap, 4096), &ok);
-    if (!ok) return ROCKSDB_NAMESPACE::Status::IOError("csd sst-buffer alloc");
-    cl::Buffer idx_dev = MakeBuf(c_, std::max<uint64_t>(idx_cap, 4096), &ok);
-    if (!ok) return ROCKSDB_NAMESPACE::Status::IOError("csd idx-buffer alloc");
-    cl::Buffer pps_dev =
-        MakeBuf(c_, sizeof(uint64_t) * kPpsBufWords, &ok);
-    if (!ok) return ROCKSDB_NAMESPACE::Status::IOError("csd pps-buffer alloc");
-
+    if (!EnsureBuf(c_, S->sst, S->sst_cap, std::max<uint64_t>(sst_cap, 4096),
+                   "csd sst-buffer")) {
+      return ROCKSDB_NAMESPACE::Status::IOError("csd sst-buffer alloc");
+    }
+    if (!EnsureBuf(c_, S->idx, S->idx_cap, std::max<uint64_t>(idx_cap, 4096),
+                   "csd idx-buffer alloc")) {
+      return ROCKSDB_NAMESPACE::Status::IOError("csd idx-buffer alloc");
+    }
+    if (!EnsureBuf(c_, S->pps, S->pps_cap, sizeof(uint64_t) * kPpsBufWords,
+                   "csd pps-buffer")) {
+      return ROCKSDB_NAMESPACE::Status::IOError("csd pps-buffer alloc");
+    }
+    // pps 每次清零（kernel 只写本 run 文件槽 + top 域；清零保与现建零缓冲逐字节等价）
+    if (!MapBlob(c_, S->pps, sizeof(uint64_t) * kPpsBufWords, nullptr, 0)) {
+      return ROCKSDB_NAMESPACE::Status::IOError("csd pps init");
+    }
     uint64_t host_data[24] = {0};
     host_data[4] = sst_bytes;  // sst 总预算（kernel 内部 4 等分，单文件用片 1）
     for (uint32_t p = 0; p < 4; ++p) {
@@ -232,21 +235,22 @@ class ZfCsdSessionOpencl final : public ZfCsdSession {
     host_data[9] = kv_sum;   // 输出记录总数（encoder 精确计数，不可下溢）
     host_data[15] = mode;    // mode 档位：1 = A+B 全版本；2 = A+B compaction/trim
     for (uint32_t p = 0; p < 4; ++p) host_data[16 + p] = kind[p];
-    cl::Buffer host_dev =
-        MakeBuf(c_, sizeof(host_data), &ok);
-    if (!ok) return ROCKSDB_NAMESPACE::Status::IOError("csd host-buffer alloc");
-    if (!MapBlob(c_, host_dev, sizeof(host_data),
+    if (!EnsureBuf(c_, S->host, S->host_cap, sizeof(host_data),
+                   "csd host-buffer")) {
+      return ROCKSDB_NAMESPACE::Status::IOError("csd host-buffer alloc");
+    }
+    if (!MapBlob(c_, S->host, sizeof(host_data),
                  reinterpret_cast<const uint8_t*>(host_data),
                  sizeof(host_data))) {
       return ROCKSDB_NAMESPACE::Status::IOError("csd host-buffer map");
     }
     if (prof_) t2 = ZfNowUs();
 
-    for (uint32_t p = 0; p < 4; ++p) c_.krn.setArg(int(p), inbuf[p]);
-    c_.krn.setArg(4, host_dev);
-    c_.krn.setArg(5, sst_dev);
-    c_.krn.setArg(6, idx_dev);
-    c_.krn.setArg(7, pps_dev);
+    for (uint32_t p = 0; p < 4; ++p) c_.krn.setArg(int(p), S->in[p]);
+    c_.krn.setArg(4, S->host);
+    c_.krn.setArg(5, S->sst);
+    c_.krn.setArg(6, S->idx);
+    c_.krn.setArg(7, S->pps);
     cl_int err;
     if (prof_) {
       cl::Event ev;
@@ -270,7 +274,7 @@ class ZfCsdSessionOpencl final : public ZfCsdSession {
     if (prof_) t3 = ZfNowUs();
 
     std::vector<uint64_t> meta(kPpsBufWords);
-    if (!MapRead(c_, pps_dev, sizeof(uint64_t) * kPpsBufWords, meta.data())) {
+    if (!MapRead(c_, S->pps, sizeof(uint64_t) * kPpsBufWords, meta.data())) {
       return ROCKSDB_NAMESPACE::Status::IOError("csd pps readback");
     }
     const uint64_t top_sst = meta[kPpsWords];           // out[512]
@@ -280,11 +284,11 @@ class ZfCsdSessionOpencl final : public ZfCsdSession {
     if (prof_) t4 = ZfNowUs();
     std::vector<uint8_t> data_b(static_cast<size_t>(top_sst));
     std::vector<uint8_t> idx_b(static_cast<size_t>(top_idx));
-    if (top_sst && !MapRead(c_, sst_dev, static_cast<size_t>(top_sst),
+    if (top_sst && !MapRead(c_, S->sst, static_cast<size_t>(top_sst),
                             data_b.data())) {
       return ROCKSDB_NAMESPACE::Status::IOError("csd data readback");
     }
-    if (top_idx && !MapRead(c_, idx_dev, static_cast<size_t>(top_idx),
+    if (top_idx && !MapRead(c_, S->idx, static_cast<size_t>(top_idx),
                             idx_b.data())) {
       return ROCKSDB_NAMESPACE::Status::IOError("csd index readback");
     }
@@ -303,9 +307,11 @@ class ZfCsdSessionOpencl final : public ZfCsdSession {
   }
 
  private:
-  // 分段含义（d 按下标）：0=in-buf 现建+map(4 口)、1=out-buf 现建+host map、
+  // 分段含义（d 按下标）：0=in-buf 入池+map(4 口)、1=out-buf 入池+pps 清零+host map、
   // 2=setArg+enqueue+finish(含 kernel)、3=pps 读回、4=data+idx 读回、
   // 5=收尾 memcpy、6=tot。kern_us 为设备侧 kernel 纯算（event 起止）。
+  // 缓冲池落地后 d0/d1 不再含 clCreateBuffer 现建往返（原 outbuf≈14ms 大头已消），
+  // 现为纯 map+memcpy+unmap（首次 run 含建池，之后稳态）。
   void EmitProfile(uint64_t d[7], uint64_t kern_us, uint64_t kv_sum,
                    uint64_t staged_bytes, uint64_t top_sst, uint64_t top_idx) {
     for (int i = 0; i < 7; ++i) sum_[i] += d[i];
@@ -353,6 +359,66 @@ class ZfCsdSessionOpencl final : public ZfCsdSession {
   uint64_t sum_[7] = {0, 0, 0, 0, 0, 0, 0};  // d[0..6] 累计（run_mu_ 下，无需原子）
   uint64_t kern_sum_ = 0;                    // kernel_ev 累计
   uint64_t run_cnt_ = 0;                     // 成功 run 计数
+
+  // ---- #37 ①缓冲池：跨 run 复用 cl::Buffer，消灭每 run ~40MB clCreateBuffer 现建
+  // ---- （profile 的 outbuf≈14ms 大头全在驱动往返）。映射/读写仍在每次 run 内现做
+  // ---- （map+memcpy+unmap，U2 已验证），仅缓冲对象跨 run 存活、容量只扩不缩。
+  // ---- pool_mu_ 护出借表；run_mu_ 已串行整段 → 实际单出借，多集为将来 async 并发
+  // ---- 打包预留。语义零变：同字节入同尺寸缓冲；pps 每次清零等价现建零缓冲。 ----
+  struct BufSet {
+    cl::Buffer in[4];               // 4 输入口（WAL 帧/sst 原样字节）
+    cl::Buffer sst, idx, pps, host; // 输出预算 + pps 元区 + host_data
+    size_t in_cap[4] = {0, 0, 0, 0};
+    size_t sst_cap = 0, idx_cap = 0, pps_cap = 0, host_cap = 0;
+    bool in_use = false;
+  };
+  std::vector<std::unique_ptr<BufSet>> pool_;  // 对象地址稳定：借出指针不因扩容失效
+  std::mutex pool_mu_;
+
+  // 出借一个空闲集；无空闲则扩容新建。借出者须以 BufSetGuard（或手动）归还。
+  BufSet* CheckoutBufSet() {
+    std::lock_guard<std::mutex> lock(pool_mu_);
+    for (const std::unique_ptr<BufSet>& s : pool_) {
+      if (!s->in_use) {
+        s->in_use = true;
+        return s.get();
+      }
+    }
+    std::unique_ptr<BufSet> s(new BufSet());
+    BufSet* raw = s.get();
+    raw->in_use = true;
+    pool_.push_back(std::move(s));
+    return raw;
+  }
+
+  // RAII 归还：出借集在 RunAb 全程作用域存活，任何 return/throw 路径都释放。
+  struct BufSetGuard {
+    BufSet* s;
+    std::mutex* mu;
+    BufSetGuard(BufSet* bs, std::mutex* m) : s(bs), mu(m) {}
+    ~BufSetGuard() {
+      if (s != nullptr) {
+        std::lock_guard<std::mutex> lock(*mu);
+        s->in_use = false;
+      }
+    }
+  };
+
+  // 容量单调增长（只扩不缩）：cap ≥ need 直接复用；否则按 need 现建并记 cap。
+  // 失败（CL alloc err）返回 false → 调用方转 IOError（与现建失败语义一致）。
+  static bool EnsureBuf(OcCtx& c, cl::Buffer& b, size_t& cap, size_t need,
+                        const char* what) {
+    if (cap >= need) return true;  // 已建且够大：复用，零驱动往返
+    cl_int err;
+    cl::Buffer nb(c.ctx, CL_MEM_READ_WRITE, need, nullptr, &err);
+    if (err != CL_SUCCESS) {
+      fprintf(stderr, "[ZF csd] buffer alloc %s %zu err %d\n", what, need, err);
+      return false;
+    }
+    b = std::move(nb);
+    cap = need;
+    return true;
+  }
 };
 
 }  // namespace
